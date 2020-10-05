@@ -134,6 +134,7 @@ class MuZeroFullyConnectedNetwork(AbstractNetwork):
         encoded_state = self.representation_network(
             observation.view(observation.shape[0], -1)
         )
+        return encoded_state
         # Scale encoded state between [0, 1] (See appendix paper Training)
         min_encoded_state = encoded_state.min(1, keepdim=True)[0]
         max_encoded_state = encoded_state.max(1, keepdim=True)[0]
@@ -157,6 +158,8 @@ class MuZeroFullyConnectedNetwork(AbstractNetwork):
         next_encoded_state = self.dynamics_encoded_state_network(x)
 
         reward = self.dynamics_reward_network(next_encoded_state)
+
+        return next_encoded_state, reward
 
         # Scale encoded state between [0, 1] (See paper appendix Training)
         min_next_encoded_state = next_encoded_state.min(1, keepdim=True)[0]
@@ -219,12 +222,13 @@ class ResidualBlock(torch.nn.Module):
         self.bn2 = torch.nn.BatchNorm2d(num_channels)
 
     def forward(self, x):
+        inp = x
         x = self.conv1(x)
         x = self.bn1(x)
         x = torch.nn.functional.relu(x)
         x = self.conv2(x)
         x = self.bn2(x)
-        x += x
+        x += inp
         x = torch.nn.functional.relu(x)
         return x
 
@@ -521,6 +525,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
 
     def representation(self, observation):
         encoded_state = self.representation_network(observation)
+        return encoded_state
 
         # Scale encoded state between [0, 1] (See appendix paper Training)
         min_encoded_state = (
@@ -567,6 +572,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
         )
         x = torch.cat((encoded_state, action_one_hot), dim=1)
         next_encoded_state, reward = self.dynamics_network(x)
+        return next_encoded_state, reward
 
         # Scale encoded state between [0, 1] (See paper appendix Training)
         min_next_encoded_state = (

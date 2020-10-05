@@ -78,42 +78,52 @@ class MuZero:
         self.num_gpus = total_gpus / split_resources_in
         if 1 < self.num_gpus:
             self.num_gpus = math.floor(self.num_gpus)
+        while True:
+            ray.shutdown()
+            print('Init cpus {}, gpus {}'.format(8, total_gpus))
+            ray.init(num_cpus=8, num_gpus=total_gpus, ignore_reinit_error=True)
 
-        ray.init(num_gpus=total_gpus, ignore_reinit_error=True)
+            # Checkpoint and replay buffer used to initialize workers
+            self.checkpoint = {
+                "weights": None,
+                "optimizer_state": None,
+                "total_reward": 0,
+                "muzero_reward": 0,
+                "opponent_reward": 0,
+                "episode_length": 0,
+                "mean_value": 0,
+                "training_step": 0,
+                "lr": 0,
+                "total_loss": 0,
+                "value_loss": 0,
+                "reward_loss": 0,
+                "policy_loss": 0,
+                "num_played_games": 0,
+                "num_played_steps": 0,
+                "num_reanalysed_games": 0,
+                "terminate": False,
+            }
+            self.replay_buffer = {}
 
-        # Checkpoint and replay buffer used to initialize workers
-        self.checkpoint = {
-            "weights": None,
-            "optimizer_state": None,
-            "total_reward": 0,
-            "muzero_reward": 0,
-            "opponent_reward": 0,
-            "episode_length": 0,
-            "mean_value": 0,
-            "training_step": 0,
-            "lr": 0,
-            "total_loss": 0,
-            "value_loss": 0,
-            "reward_loss": 0,
-            "policy_loss": 0,
-            "num_played_games": 0,
-            "num_played_steps": 0,
-            "num_reanalysed_games": 0,
-            "terminate": False,
-        }
-        self.replay_buffer = {}
+            @ray.remote(num_cpus=0, num_gpus=1)
+            def f():
+                return torch.cuda.is_available()
 
-        # Trick to force DataParallel to stay on CPU
-        @ray.remote(num_cpus=0, num_gpus=1 if total_gpus else 0)
-        def get_initial_weights(config):
-            model = models.MuZeroNetwork(config)
-            weigths = model.get_weights()
-            summary = str(model).replace("\n", " \n\n")
-            return weigths, summary
+            f.remote()
 
-        self.checkpoint["weights"], self.summary = ray.get(
-            get_initial_weights.remote(self.config)
-        )
+            # Trick to force DataParallel to stay on CPU
+            @ray.remote(num_cpus=0, num_gpus=0)
+            def get_initial_weights(config):
+                model = models.MuZeroNetwork(config)
+                weigths = model.get_weights()
+                summary = str(model).replace("\n", " \n\n")
+                return weigths, summary
+
+            self.checkpoint["weights"], self.summary = ray.get(
+                get_initial_weights.remote(self.config)
+            )
+            if ray.get(f.remote()):
+                break
 
         # Workers
         self.self_play_workers = None
@@ -145,6 +155,8 @@ class MuZero:
                 num_gpus_per_worker = math.floor(num_gpus_per_worker)
         else:
             num_gpus_per_worker = 0
+
+        print('Num gpus per worker', num_gpus_per_worker)
 
         # Initialize workers
         self.training_worker = trainer.Trainer.options(
@@ -262,58 +274,58 @@ class MuZero:
             while info["training_step"] < self.config.training_steps:
                 info = ray.get(self.shared_storage_worker.get_info.remote(keys))
                 writer.add_scalar(
-                    "1.Total reward/1.Total reward",
+                    "1.Total_reward/1.Total_reward",
                     info["total_reward"],
                     counter,
                 )
                 writer.add_scalar(
-                    "1.Total reward/2.Mean value",
+                    "1.Total_reward/2.Mean_value",
                     info["mean_value"],
                     counter,
                 )
                 writer.add_scalar(
-                    "1.Total reward/3.Episode length",
+                    "1.Total_reward/3.Episode_length",
                     info["episode_length"],
                     counter,
                 )
                 writer.add_scalar(
-                    "1.Total reward/4.MuZero reward",
+                    "1.Total_reward/4.MuZero_reward",
                     info["muzero_reward"],
                     counter,
                 )
                 writer.add_scalar(
-                    "1.Total reward/5.Opponent reward",
+                    "1.Total_reward/5.Opponent_reward",
                     info["opponent_reward"],
                     counter,
                 )
                 writer.add_scalar(
-                    "2.Workers/1.Self played games",
+                    "2.Workers/1.Self_played_games",
                     info["num_played_games"],
                     counter,
                 )
                 writer.add_scalar(
-                    "2.Workers/2.Training steps", info["training_step"], counter
+                    "2.Workers/2.Training_steps", info["training_step"], counter
                 )
                 writer.add_scalar(
-                    "2.Workers/3.Self played steps", info["num_played_steps"], counter
+                    "2.Workers/3.Self_played_steps", info["num_played_steps"], counter
                 )
                 writer.add_scalar(
-                    "2.Workers/4.Reanalysed games",
+                    "2.Workers/4.Reanalysed_games",
                     info["num_reanalysed_games"],
                     counter,
                 )
                 writer.add_scalar(
-                    "2.Workers/5.Training steps per self played step ratio",
+                    "2.Workers/5.Training_steps_per_self_played_step_ratio",
                     info["training_step"] / max(1, info["num_played_steps"]),
                     counter,
                 )
-                writer.add_scalar("2.Workers/6.Learning rate", info["lr"], counter)
+                writer.add_scalar("2.Workers/6.Learning_rate", info["lr"], counter)
                 writer.add_scalar(
-                    "3.Loss/1.Total weighted loss", info["total_loss"], counter
+                    "3.Loss/1.Total_weighted_loss", info["total_loss"], counter
                 )
-                writer.add_scalar("3.Loss/Value loss", info["value_loss"], counter)
-                writer.add_scalar("3.Loss/Reward loss", info["reward_loss"], counter)
-                writer.add_scalar("3.Loss/Policy loss", info["policy_loss"], counter)
+                writer.add_scalar("3.Loss/Value_loss", info["value_loss"], counter)
+                writer.add_scalar("3.Loss/Reward_loss", info["reward_loss"], counter)
+                writer.add_scalar("3.Loss/Policy_loss", info["policy_loss"], counter)
                 print(
                     f'Last test reward: {info["total_reward"]:.2f}. Training step: {info["training_step"]}/{self.config.training_steps}. Played games: {info["num_played_games"]}. Loss: {info["total_loss"]:.2f}',
                     end="\r",
@@ -451,7 +463,7 @@ class MuZero:
         Args:
             horizon (int): Number of timesteps for which we collect information.
         """
-        game = self.Game(self.config.seed)
+        game = self.Game()
         obs = game.reset()
         dm = diagnose_model.DiagnoseModel(self.checkpoint, self.config)
         dm.compare_virtual_with_real_trajectories(obs, game, horizon)
@@ -616,22 +628,23 @@ if __name__ == "__main__":
                     replay_buffer_path=replay_buffer_path,
                 )
             elif choice == 2:
-                muzero.diagnose_model(30)
+                muzero.diagnose_model(50)
             elif choice == 3:
                 muzero.test(render=True, opponent="self", muzero_player=None)
             elif choice == 4:
                 muzero.test(render=True, opponent="human", muzero_player=0)
             elif choice == 5:
                 env = muzero.Game()
-                env.reset()
-                env.render()
+                observation = env.reset()
+                # env.render()
 
                 done = False
                 while not done:
+                    print('Obs', observation)
                     action = env.human_to_action()
                     observation, reward, done = env.step(action)
                     print(f"\nAction: {env.action_to_string(action)}\nReward: {reward}")
-                    env.render()
+                    # env.render()
             elif choice == 6:
                 # Define here the parameters to tune
                 # Parametrization documentation: https://facebookresearch.github.io/nevergrad/parametrization.html

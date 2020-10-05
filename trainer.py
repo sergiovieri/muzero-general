@@ -22,6 +22,10 @@ class Trainer:
         numpy.random.seed(self.config.seed)
         torch.manual_seed(self.config.seed)
 
+        print('Ray gpus', ray.get_gpu_ids())
+        print('Torch gpu:', torch.cuda.is_available())
+        import os
+        print("CUDA_VISIBLE_DEVICES: {}".format(os.environ["CUDA_VISIBLE_DEVICES"]))
         # Initialize the network
         self.model = models.MuZeroNetwork(self.config)
         self.model.set_weights(copy.deepcopy(initial_checkpoint["weights"]))
@@ -115,7 +119,7 @@ class Trainer:
                     / max(
                         1, ray.get(shared_storage.get_info.remote("num_played_steps"))
                     )
-                    > self.config.ratio
+                    > self.config.ratio * 1.1
                     and self.training_step < self.config.training_steps
                     and not ray.get(shared_storage.get_info.remote("terminate"))
                 ):
