@@ -34,7 +34,7 @@ class DiagnoseModel:
         """
         trajectory_info = Trajectoryinfo("Virtual trajectory", self.config)
         root, mcts_info = MCTS(self.config).run(
-            self.model, observation, self.config.action_space, to_play, True
+            self.model, observation, self.config.action_space, to_play, False
         )
         trajectory_info.store_info(root, mcts_info, None, numpy.NaN)
 
@@ -89,6 +89,7 @@ class DiagnoseModel:
         virtual_trajectory_info = self.get_virtual_trajectory_from_obs(
             first_obs, horizon, False
         )
+
         real_trajectory_info = Trajectoryinfo("Real trajectory", self.config)
         trajectory_divergence_index = None
         real_trajectory_end_reason = "Reached horizon"
@@ -99,7 +100,7 @@ class DiagnoseModel:
             first_obs,
             game.legal_actions(),
             game.to_play(),
-            True,
+            False,
         )
         self.plot_mcts(root, plot)
         real_trajectory_info.store_info(root, mcts_info, None, numpy.NaN)
@@ -113,6 +114,9 @@ class DiagnoseModel:
                     real_trajectory_end_reason = f"Virtual trajectory reached an illegal move at timestep {trajectory_divergence_index}."
 
             observation, reward, done = game.step(action)
+            print(i, observation)
+            print('Predicted', action)
+            print(root.children[action].hidden_state)
             root, mcts_info = MCTS(self.config).run(
                 self.model,
                 observation,
@@ -120,6 +124,8 @@ class DiagnoseModel:
                 game.to_play(),
                 True,
             )
+            print('Actual')
+            print(root.hidden_state)
             real_trajectory_info.store_info(root, mcts_info, action, reward)
             if done:
                 real_trajectory_end_reason = "Real trajectory reached Done"
