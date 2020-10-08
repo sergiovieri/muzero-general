@@ -206,9 +206,9 @@ class MuZeroFullyConnectedNetwork(AbstractNetwork):
 ############# ResNet #############
 
 
-def conv3x3(in_channels, out_channels, stride=1):
+def conv3x3(in_channels, out_channels, stride=1, bias=False):
     return torch.nn.Conv2d(
-        in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False
+        in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=bias
     )
 
 
@@ -218,18 +218,33 @@ class ResidualBlock(torch.nn.Module):
         super().__init__()
         self.conv1 = conv3x3(num_channels, num_channels, stride)
         self.bn1 = torch.nn.BatchNorm2d(num_channels)
-        self.conv2 = conv3x3(num_channels, num_channels)
+        self.conv2 = conv3x3(num_channels, num_channels, bias=True)
         self.bn2 = torch.nn.BatchNorm2d(num_channels)
+        # self.act1 = torch.nn.ELU()
+        # self.act2 = torch.nn.ELU()
 
-    def forward(self, x):
+    def forward2(self, x):
         inp = x
         x = self.conv1(x)
         x = self.bn1(x)
         x = torch.nn.functional.relu(x)
+        # x = self.act1(x)
         x = self.conv2(x)
         x = self.bn2(x)
         x += inp
         x = torch.nn.functional.relu(x)
+        # x = self.act2(x)
+        return x
+
+    def forward(self, x):
+        inp = x
+        x = self.bn1(x)
+        x = torch.nn.functional.relu(x)
+        x = self.conv1(x)
+        x = self.bn2(x)
+        x = torch.nn.functional.relu(x)
+        x = self.conv2(x)
+        x += inp
         return x
 
 
@@ -336,9 +351,12 @@ class RepresentationNetwork(torch.nn.Module):
             num_channels,
         )
         self.bn = torch.nn.BatchNorm2d(num_channels)
+        # self.act = torch.nn.ELU()
         self.resblocks = torch.nn.ModuleList(
             [ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
+        # self.conv2 = conv3x3(num_channels, num_channels)
+        # self.bn2 = torch.nn.BatchNorm2d(num_channels)
 
     def forward(self, x):
         if self.downsample:
@@ -347,9 +365,14 @@ class RepresentationNetwork(torch.nn.Module):
             x = self.conv(x)
             x = self.bn(x)
             x = torch.nn.functional.relu(x)
+            # x = self.act(x)
 
         for block in self.resblocks:
             x = block(x)
+        # x = self.conv2(x)
+        # x = self.bn2(x)
+        # if x.shape[0] == 1:
+        #     print('represent', x)
         return x
 
 
@@ -358,20 +381,21 @@ class DynamicsNetwork(torch.nn.Module):
         self,
         num_blocks,
         num_channels,
+        action_space_size,
         reduced_channels_reward,
         fc_reward_layers,
         full_support_size,
         block_output_size_reward,
     ):
         super().__init__()
-        self.conv = conv3x3(num_channels, num_channels - 1)
-        self.bn = torch.nn.BatchNorm2d(num_channels - 1)
+        self.conv = conv3x3(num_channels + action_space_size, num_channels)
+        self.bn = torch.nn.BatchNorm2d(num_channels)
         self.resblocks = torch.nn.ModuleList(
-            [ResidualBlock(num_channels - 1) for _ in range(num_blocks)]
+            [ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
 
         self.conv1x1_reward = torch.nn.Conv2d(
-            num_channels - 1, reduced_channels_reward, 1
+            num_channels, reduced_channels_reward, 1
         )
         self.block_output_size_reward = block_output_size_reward
         self.fc = mlp(
@@ -406,10 +430,6 @@ class PredictionNetwork(torch.nn.Module):
         block_output_size_policy,
     ):
         super().__init__()
-        self.resblocks = torch.nn.ModuleList(
-            [ResidualBlock(num_channels) for _ in range(num_blocks)]
-        )
-
         self.conv1x1_value = torch.nn.Conv2d(num_channels, reduced_channels_value, 1)
         self.conv1x1_policy = torch.nn.Conv2d(num_channels, reduced_channels_policy, 1)
         self.block_output_size_value = block_output_size_value
@@ -422,8 +442,6 @@ class PredictionNetwork(torch.nn.Module):
         )
 
     def forward(self, x):
-        for block in self.resblocks:
-            x = block(x)
         value = self.conv1x1_value(x)
         policy = self.conv1x1_policy(x)
         value = value.view(-1, self.block_output_size_value)
@@ -496,7 +514,8 @@ class MuZeroResidualNetwork(AbstractNetwork):
         self.dynamics_network = torch.nn.DataParallel(
             DynamicsNetwork(
                 num_blocks,
-                num_channels + 1,
+                num_channels,
+                self.action_space_size,
                 reduced_channels_reward,
                 fc_reward_layers,
                 self.full_support_size,
@@ -556,20 +575,31 @@ class MuZeroResidualNetwork(AbstractNetwork):
     def dynamics(self, encoded_state, action):
         # Stack encoded_state with a game specific one hot encoded action (See paper appendix Network Architecture)
         action_one_hot = (
-            torch.ones(
-                (
-                    encoded_state.shape[0],
-                    1,
-                    encoded_state.shape[2],
-                    encoded_state.shape[3],
-                )
-            )
+            torch.zeros((action.shape[0], self.action_space_size))
             .to(action.device)
             .float()
         )
-        action_one_hot = (
-            action[:, :, None, None] * action_one_hot / self.action_space_size
-        )
+        action_one_hot.scatter_(1, action.long(), 1.0)
+        action_one_hot.unsqueeze_(-1)
+        action_one_hot.unsqueeze_(-1)
+        action_one_hot = action_one_hot.expand(-1, -1, encoded_state.shape[2], encoded_state.shape[3])
+        # print('es', encoded_state.shape)
+        # print('aoh', action_one_hot.shape)
+        # action_one_hot = (
+        #     torch.ones(
+        #         (
+        #             encoded_state.shape[0],
+        #             1,
+        #             encoded_state.shape[2],
+        #             encoded_state.shape[3],
+        #         )
+        #     )
+        #     .to(action.device)
+        #     .float()
+        # )
+        # action_one_hot = (
+        #     action[:, :, None, None] * action_one_hot / self.action_space_size
+        # )
         x = torch.cat((encoded_state, action_one_hot), dim=1)
         next_encoded_state, reward = self.dynamics_network(x)
         return next_encoded_state, reward

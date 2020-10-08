@@ -109,10 +109,10 @@ class MuZero:
             def f():
                 return torch.cuda.is_available()
 
-            f.remote()
+            print('First check', ray.get(f.remote()))
 
             # Trick to force DataParallel to stay on CPU
-            @ray.remote(num_cpus=0, num_gpus=0)
+            @ray.remote(num_cpus=1, num_gpus=0)
             def get_initial_weights(config):
                 model = models.MuZeroNetwork(config)
                 weigths = model.get_weights()

@@ -54,6 +54,7 @@ class DiagnoseModel:
                 torch.tensor([[action]]).to(root.hidden_state.device),
             )
             value = models.support_to_scalar(value, self.config.support_size).item()
+            print('Value debug', value)
             reward = models.support_to_scalar(reward, self.config.support_size).item()
             root = Node(0)
             root.expand(
@@ -246,7 +247,7 @@ class Trajectoryinfo:
         )
         self.prior_root_value.append(
             mcts_info["root_predicted_value"]
-            if not new_prior_root_value
+            if new_prior_root_value is None
             else new_prior_root_value
         )
         self.root_value_after_planning.append(root.value())

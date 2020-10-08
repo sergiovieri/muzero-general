@@ -88,11 +88,15 @@ class ReplayBuffer:
             )
 
             index_batch.append([game_id, game_pos])
-            observation_batch.append(
-                game_history.get_stacked_observations(
-                    game_pos, self.config.stacked_observations
-                )
-            )
+            observation_batch.append([])
+
+            for i in range(game_pos, game_pos + self.config.num_unroll_steps + 1):
+                # if i >= len(game_history.observation_history): break
+                cpos = min(i, len(game_history.observation_history) - 1)
+                observation_batch[-1].append(game_history.get_stacked_observations(
+                    cpos, self.config.stacked_observations
+                ))
+
             action_batch.append(actions)
             value_batch.append(values)
             reward_batch.append(rewards)
@@ -286,6 +290,11 @@ class Reanalyse:
 
     def __init__(self, initial_checkpoint, config):
         self.config = config
+
+        print('Ray gpus', ray.get_gpu_ids())
+        print('Torch gpu:', torch.cuda.is_available())
+        import os
+        print("CUDA_VISIBLE_DEVICES: {}".format(os.environ["CUDA_VISIBLE_DEVICES"]))
 
         # Fix random generator seed
         numpy.random.seed(self.config.seed)
