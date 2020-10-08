@@ -61,6 +61,8 @@ class SelfPlay:
                     self.config.muzero_player,
                 )
 
+                print('Played test', sum(game_history.reward_history))
+
                 # Save to the shared storage
                 shared_storage.set_info.remote(
                     {

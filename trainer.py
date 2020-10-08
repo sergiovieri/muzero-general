@@ -71,7 +71,9 @@ class Trainer:
         while self.training_step < self.config.training_steps and not ray.get(
             shared_storage.get_info.remote("terminate")
         ):
+            print('Start train loop')
             index_batch, batch = ray.get(replay_buffer.get_batch.remote())
+            print('Got batch')
             self.update_lr()
             (
                 priorities,
@@ -80,6 +82,7 @@ class Trainer:
                 reward_loss,
                 policy_loss,
             ) = self.update_weights(batch)
+            print('Weights updated')
 
             if self.config.PER:
                 # Save new priorities in the replay buffer (See https://arxiv.org/abs/1803.00933)
@@ -138,6 +141,7 @@ class Trainer:
             gradient_scale_batch,
         ) = batch
 
+        print('Update weights')
         # Keep values as scalars for calculating the priorities for the prioritized replay
         target_value_scalar = numpy.array(target_value, dtype="float32")
         priorities = numpy.zeros_like(target_value_scalar)
@@ -145,18 +149,20 @@ class Trainer:
         device = next(self.model.parameters()).device
         if self.config.PER:
             weight_batch = torch.tensor(weight_batch.copy()).float().to(device)
-        observation_batch = torch.tensor(observation_batch).float().to(device)
+        observation_numpy = numpy.array(observation_batch, dtype=numpy.float32)
+        observation_batch = torch.tensor(observation_numpy).float().to(device)
         action_batch = torch.tensor(action_batch).long().to(device).unsqueeze(-1)
         target_value = torch.tensor(target_value).float().to(device)
         target_reward = torch.tensor(target_reward).float().to(device)
         target_policy = torch.tensor(target_policy).float().to(device)
         gradient_scale_batch = torch.tensor(gradient_scale_batch).float().to(device)
-        # observation_batch: batch, channels, height, width
+        # observation_batch: batch, num_unroll_steps+1, channels, height, width
         # action_batch: batch, num_unroll_steps+1, 1 (unsqueeze)
         # target_value: batch, num_unroll_steps+1
         # target_reward: batch, num_unroll_steps+1
         # target_policy: batch, num_unroll_steps+1, len(action_space)
         # gradient_scale_batch: batch, num_unroll_steps+1
+
 
         target_value = models.scalar_to_support(target_value, self.config.support_size)
         target_reward = models.scalar_to_support(
@@ -167,17 +173,30 @@ class Trainer:
 
         ## Generate predictions
         value, reward, policy_logits, hidden_state = self.model.initial_inference(
-            observation_batch
+            observation_batch[:, 0]
         )
         predictions = [(value, reward, policy_logits)]
+        batch_size = observation_batch.shape[0]
+        ori_hidden_state = hidden_state
+        next_loss = 0
         for i in range(1, action_batch.shape[1]):
             value, reward, policy_logits, hidden_state = self.model.recurrent_inference(
                 hidden_state, action_batch[:, i]
             )
+            target_state = self.model.initial_inference(observation_batch[:, i])[3].detach()
+            current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
+            if i == 1:
+                next_loss = current_loss
+            elif i < observation_batch.shape[1]:
+                next_loss += current_loss
+            print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
+                    torch.nn.MSELoss()(target_state, ori_hidden_state).item())
             # Scale the gradient at the start of the dynamics function (See paper appendix Training)
             hidden_state.register_hook(lambda grad: grad * 0.5)
             predictions.append((value, reward, policy_logits))
         # predictions: num_unroll_steps+1, 3, batch, 2*support_size+1 | 2*support_size+1 | 9 (according to the 2nd dim)
+
+        print('Done pred')
 
         ## Compute losses
         value_loss, reward_loss, policy_loss = (0, 0, 0)
@@ -250,7 +269,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss
+        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss + 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
             loss *= weight_batch
@@ -276,9 +295,13 @@ class Trainer:
         """
         Update learning rate
         """
-        lr = self.config.lr_init * self.config.lr_decay_rate ** (
-            self.training_step / self.config.lr_decay_steps
-        )
+        warmup = 10
+        if self.training_step < warmup:
+            lr = self.config.lr_init * (self.training_step + 1) / warmup
+        else:
+            lr = self.config.lr_init * self.config.lr_decay_rate ** (
+                self.training_step / self.config.lr_decay_steps
+            )
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = lr
 
