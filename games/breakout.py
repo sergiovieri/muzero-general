@@ -36,7 +36,7 @@ class MuZeroConfig:
 
         ### Self-Play
         self.num_workers = 3  # Number of simultaneous threads/workers self-playing to feed the replay buffer
-        self.selfplay_on_gpu = True
+        self.selfplay_on_gpu = True if torch.cuda.is_available() else False
         self.max_moves = 1000  # Maximum number of moves if game is not finished before
         self.num_simulations = 10  # Number of future moves self-simulated
         self.discount = 0.997  # Chronological discount of the reward
