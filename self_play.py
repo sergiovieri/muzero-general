@@ -164,6 +164,37 @@ class SelfPlay:
                         print(
                             f"Root value for player {self.game.to_play()}: {root.value():.2f}"
                         )
+                        values_after_planning = [
+                            root.children[action].value()
+                            if action in root.children.keys()
+                            else numpy.NaN
+                            for action in self.config.action_space
+                        ]
+                        print(f"Root values: {values_after_planning}")
+
+                        prior_policy = [
+                            root.children[action].prior
+                            if action in root.children.keys()
+                            else numpy.NaN
+                            for action in self.config.action_space
+                        ]
+                        print(f"Prior policy: {prior_policy}")
+
+                        policy_after_planning = [
+                            root.children[action].visit_count / self.config.num_simulations
+                            if action in root.children.keys()
+                            else numpy.NaN
+                            for action in self.config.action_space
+                        ]
+                        print(f"Policy after planning: {policy_after_planning}")
+
+                        prior_rewards = [
+                            root.children[action].reward
+                            if action in root.children.keys()
+                            else numpy.NaN
+                            for action in self.config.action_space
+                        ]
+                        print(f"Prior rewards: {prior_rewards}")
                 else:
                     action, root = self.select_opponent_action(
                         opponent, stacked_observations
@@ -173,6 +204,7 @@ class SelfPlay:
 
                 if render:
                     print(f"Played action: {self.game.action_to_string(action)}")
+                    print(f"Actual reward: {reward:.2f}")
                     self.game.render()
 
                 game_history.store_search_statistics(root, self.config.action_space)

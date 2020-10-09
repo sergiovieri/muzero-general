@@ -97,7 +97,7 @@ class MuZero:
             }
             self.replay_buffer = {}
 
-            @ray.remote(num_cpus=0, num_gpus=1)
+            @ray.remote(num_cpus=0, num_gpus=total_gpus)
             def f():
                 return torch.cuda.is_available()
 
@@ -114,7 +114,7 @@ class MuZero:
             self.checkpoint["weights"], self.summary = ray.get(
                 get_initial_weights.remote(self.config)
             )
-            if ray.get(f.remote()):
+            if total_gpus == 0 or ray.get(f.remote()):
                 break
 
         # Workers
@@ -628,7 +628,7 @@ if __name__ == "__main__":
             elif choice == 5:
                 env = muzero.Game()
                 observation = env.reset()
-                # env.render()
+                env.render()
 
                 done = False
                 while not done:
@@ -636,7 +636,7 @@ if __name__ == "__main__":
                     action = env.human_to_action()
                     observation, reward, done = env.step(action)
                     print(f"\nAction: {env.action_to_string(action)}\nReward: {reward}")
-                    # env.render()
+                    env.render()
             elif choice == 6:
                 # Define here the parameters to tune
                 # Parametrization documentation: https://facebookresearch.github.io/nevergrad/parametrization.html
