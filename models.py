@@ -220,20 +220,16 @@ class ResidualBlock(torch.nn.Module):
         self.bn1 = torch.nn.BatchNorm2d(num_channels)
         self.conv2 = conv3x3(num_channels, num_channels, bias=True)
         self.bn2 = torch.nn.BatchNorm2d(num_channels)
-        # self.act1 = torch.nn.ELU()
-        # self.act2 = torch.nn.ELU()
 
     def forward2(self, x):
         inp = x
         x = self.conv1(x)
         x = self.bn1(x)
         x = torch.nn.functional.relu(x)
-        # x = self.act1(x)
         x = self.conv2(x)
         x = self.bn2(x)
         x += inp
         x = torch.nn.functional.relu(x)
-        # x = self.act2(x)
         return x
 
     def forward(self, x):
@@ -258,8 +254,9 @@ class DownSample(torch.nn.Module):
             kernel_size=3,
             stride=2,
             padding=1,
-            bias=False,
+            bias=True,
         )
+        # self.bn1 = torch.nn.BatchNorm2d(out_channels // 2)
         self.resblocks1 = torch.nn.ModuleList(
             [ResidualBlock(out_channels // 2) for _ in range(2)]
         )
@@ -269,8 +266,9 @@ class DownSample(torch.nn.Module):
             kernel_size=3,
             stride=2,
             padding=1,
-            bias=False,
+            bias=True,
         )
+        # self.bn2 = torch.nn.BatchNorm2d(out_channels)
         self.resblocks2 = torch.nn.ModuleList(
             [ResidualBlock(out_channels) for _ in range(3)]
         )
@@ -282,9 +280,13 @@ class DownSample(torch.nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
+        # x = self.bn1(x)
+        # x = torch.nn.functional.relu(x)
         for block in self.resblocks1:
             x = block(x)
         x = self.conv2(x)
+        # x = self.bn2(x)
+        # x = torch.nn.functional.relu(x)
         for block in self.resblocks2:
             x = block(x)
         x = self.pooling1(x)
@@ -388,8 +390,8 @@ class DynamicsNetwork(torch.nn.Module):
         block_output_size_reward,
     ):
         super().__init__()
-        self.conv = conv3x3(num_channels + action_space_size, num_channels)
-        self.bn = torch.nn.BatchNorm2d(num_channels)
+        self.conv = conv3x3(num_channels + action_space_size, num_channels, bias=True)
+        # self.bn = torch.nn.BatchNorm2d(num_channels)
         self.resblocks = torch.nn.ModuleList(
             [ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
@@ -397,6 +399,7 @@ class DynamicsNetwork(torch.nn.Module):
         self.conv1x1_reward = torch.nn.Conv2d(
             num_channels, reduced_channels_reward, 1
         )
+        # self.bn_reward = torch.nn.BatchNorm2d(reduced_channels_reward)
         self.block_output_size_reward = block_output_size_reward
         self.fc = mlp(
             self.block_output_size_reward, fc_reward_layers, full_support_size,
@@ -404,12 +407,14 @@ class DynamicsNetwork(torch.nn.Module):
 
     def forward(self, x):
         x = self.conv(x)
-        x = self.bn(x)
-        x = torch.nn.functional.relu(x)
+        # x = self.bn(x)
+        # x = torch.nn.functional.relu(x)
         for block in self.resblocks:
             x = block(x)
         state = x
         x = self.conv1x1_reward(x)
+        # x = self.bn_reward(x)
+        # x = torch.nn.functional.relu(x)
         x = x.view(-1, self.block_output_size_reward)
         reward = self.fc(x)
         return state, reward
@@ -657,6 +662,160 @@ class MuZeroResidualNetwork(AbstractNetwork):
 
 ########### End ResNet ###########
 ##################################
+
+class RepresentationJago(torch.nn.Module):
+    def __init__(
+        self,
+        observation_shape,
+        stacked_observations,
+        encoding_size,
+    ):
+        super().__init__()
+        num_channels = 256
+        self.conv1 = torch.nn.Conv2d(
+            observation_shape[0] * (stacked_observations + 1)
+            + stacked_observations,
+            num_channels // 2,
+            kernel_size=3,
+            stride=2,
+            padding=1,
+            bias=False,
+        )
+        self.bn1 = torch.nn.BatchNorm2d()
+        self.resblocks1 = torch.nn.Modulelist(
+            [ResidualBlock(out_channels // 2) for _ in range(2)]
+        )
+        self.conv2 = torch.nn.Conv2d(
+            num_channels // 2,
+            num_channels,
+            kernel_size=3,
+            stride=2,
+            padding=1,
+            bias=False,
+        )
+        self.bn2 = torch.nn.BatchNorm2d()
+        self.resblocks2 = torch.nn.Modulelist(
+            [ResidualBlock(num_channels) for _ in range(3)]
+        )
+        self.pooling1 = torch.n.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        self.resblocks3 = torch.nn.ModuleList(
+            [ResidualBlock(num_channels) for _ in range(3)]
+        )
+        self.pooling2 = torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        self.conv3 = torch.nn.Conv2d(
+            num_channels,
+            32,
+            kernel_size=3,
+            padding=1,
+            bias=False,
+        )
+        self.bn3 = torch.nn.BatchNorm2d()
+        self.fc = mlp(6 * 6 * 32, [16], encoding_size)
+
+    def forward(self, x):
+        x = self.bn1(self.conv1(x))
+        for block in self.resblocks1:
+            x = block(x)
+        x = self.bn2(self.conv2(x))
+        for block in self.resblocks2:
+            x = block(x)
+        x = self.pooling1(x)
+        for block in self.resblocks3:
+            x = block(x)
+        x = self.pooling2(x)
+        x = self.bn3(self.conv3(x))
+        x = x.view(-1, 6 * 6 * 32)
+        x = self.fc(x)
+        return x
+
+class MuZeroJagoNetwork(AbstractNetwork):
+    def __init__(
+        self,
+        observation_shape,
+        stacked_observations,
+        action_space_size,
+        encoding_size,
+        support_size,
+    ):
+        super().__init__()
+        self.action_space_size = action_space_size
+        self.full_support_size = 2 * support_size + 1
+
+        self.representation_network = torch.nn.DataParallel(
+            RepresentationJago(
+                observation_shape,
+                stacked_observations,
+                encoding_size,
+            )
+        )
+
+        self.dynamics_encoded_state_network = torch.nn.DataParallel(
+            mlp(
+                encoding_size + self.actions_space_size,
+                fc_dynamics_layers,
+                encoding_size,
+            )
+        )
+        self.dynamics_reward_network = torch.nn.DataParallel(
+            mlp(encoding_size, fc_reward_layers, self.full_support_size)
+        )
+
+        self.prediction_policy_network = torch.nn.DataParallel(
+            mlp(encoding_size, fc_policy_layers, self.action_space_size)
+        )
+        self.prediction_value_network = torch.nn.DataParallel(
+            mlp(encoding_size, fc_value_layers, self.full_support_size)
+        )
+
+    def prediction(self, encoded_state):
+        policy_logits = self.prediction_policy_network(encoded_state)
+        value = self.prediction_value_network(encoded_state)
+        return policy_logits, value
+
+    def representation(self, observation):
+        encoded_state = self.representation_network(
+            observation.view(observation.shape[0], -1)
+        )
+        return encoded_state
+
+    def dynamics(self, encoded_state, action):
+        action_one_hot = (
+            torch.zeros((action.shape[0], self.action_space_size))
+            .to(action.device)
+            .float()
+        )
+        action_one_hot.scatter_(1, action.long(), 1.0)
+        x = torch.cat((encoded_state, action_one_hot), dim=1)
+
+        next_encoded_state = self.dynamics_encoded_state_network(x)
+
+        reward = self.dynamics_reward_network(next_encoded_state)
+
+        return next_encoded_state, reward
+
+    def initial_inference(self, observation):
+        encoded_state = self.representation_network(observation)
+        policy_logits, value = self.prediction(encoded_state)
+        reward = torch.log(
+            (
+                torch.zeros(1, self.full_support_size)
+                .scatter(1, torch.tensor([[self.full_support_size // 2]]).long(), 1.0)
+                .repeat(len(observation), 1)
+                .to(observation.device)
+            )
+        )
+
+        return (
+            value,
+            reward,
+            policy_logits,
+            encoded_state,
+        )
+
+        def recurrent_inference(self, encoded_state, action):
+            next_encoded_state, reward = self.dynamics(encoded_state, action)
+            policy_logits, value = self.prediction(next_encoded_state)
+            return value, reward, policy_logits, next_encoded_state
 
 
 def mlp(

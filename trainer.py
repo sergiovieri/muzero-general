@@ -40,10 +40,9 @@ class Trainer:
         # Initialize the optimizer
         if self.config.optimizer == "SGD":
             self.optimizer = torch.optim.SGD(
-                self.model.parameters(),
+                self.add_weight_decay(self.model, self.config.weight_decay),
                 lr=self.config.lr_init,
                 momentum=self.config.momentum,
-                weight_decay=self.config.weight_decay,
             )
         elif self.config.optimizer == "Adam":
             self.optimizer = torch.optim.Adam(
@@ -67,13 +66,15 @@ class Trainer:
         while ray.get(shared_storage.get_info.remote("num_played_games")) < 1:
             time.sleep(0.1)
 
-        next_batch = replay_buffer.get_batch.remote()
+        pipelined_batch = replay_buffer.get_batch.remote()
+
         # Training loop
         while self.training_step < self.config.training_steps and not ray.get(
             shared_storage.get_info.remote("terminate")
         ):
             print('Start train loop')
-            index_batch, batch = ray.get(replay_buffer.get_batch.remote())
+            index_batch, batch = ray.get(pipelined_batch)
+            pipelined_batch = replay_buffer.get_batch.remote()
             print('Got batch')
             self.update_lr()
             (
@@ -166,6 +167,10 @@ class Trainer:
 
 
         target_value = models.scalar_to_support(target_value, self.config.support_size)
+        mau = None
+        for i in range(target_reward.shape[0]):
+            if target_reward[i][1:].sum() > 0.5:
+                mau = i
         target_reward = models.scalar_to_support(
             target_reward, self.config.support_size
         )
@@ -184,6 +189,12 @@ class Trainer:
             value, reward, policy_logits, hidden_state = self.model.recurrent_inference(
                 hidden_state, action_batch[:, i]
             )
+            if mau is not None:
+                print(target_reward[mau, i])
+                print(torch.nn.Softmax(dim=0)(reward[mau]))
+                print(models.support_to_scalar(reward[mau:mau+1], self.config.support_size))
+                print(torch.nn.Softmax(dim=0)(reward[0]))
+                print(models.support_to_scalar(reward[0:1], self.config.support_size))
             target_state = self.model.initial_inference(observation_batch[:, i])[3].detach()
             current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
             if i == 1:
@@ -240,6 +251,8 @@ class Trainer:
                 target_reward[:, i],
                 target_policy[:, i],
             )
+            if mau is not None:
+                print('reward_loss', current_reward_loss[mau].mean().item())
 
             # Scale gradient by the number of unroll steps (See paper appendix Training)
             current_value_loss.register_hook(
@@ -270,7 +283,8 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss + 0.01 * next_loss
+        # loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss #+ 0.01 * next_loss
+        loss = reward_loss #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
             loss *= weight_batch
@@ -296,7 +310,7 @@ class Trainer:
         """
         Update learning rate
         """
-        warmup = 10
+        warmup = 1000
         if self.training_step < warmup:
             lr = self.config.lr_init * (self.training_step + 1) / warmup
         else:
@@ -322,3 +336,12 @@ class Trainer:
             1
         )
         return value_loss, reward_loss, policy_loss
+
+    @staticmethod
+    def add_weight_decay(net, l2_value, skip_list=()):
+        decay, no_decay = [], []
+        for name, param in net.named_parameters():
+            if not param.requires_grad: continue # frozen weights
+            if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list: no_decay.append(param)
+            else: decay.append(param)
+        return [{'params': no_decay, 'weight_decay': 0.}, {'params': decay, 'weight_decay': l2_value}] 
