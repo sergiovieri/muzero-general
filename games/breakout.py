@@ -26,7 +26,7 @@ class MuZeroConfig:
         self.observation_shape = (3, 96, 96)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
         self.action_space = list(range(4))  # Fixed list of all possible actions. You should only edit the length
         self.players = list(range(1))  # List of players. You should only edit the length
-        self.stacked_observations = 4  # Number of previous observations and previous actions to add to the current observation
+        self.stacked_observations = 1  # Number of previous observations and previous actions to add to the current observation
 
         # Evaluate
         self.muzero_player = 0  # Turn Muzero begins to play (0: MuZero plays first, 1: MuZero plays second)
@@ -35,10 +35,10 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 2  # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 3  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = True
-        self.max_moves = 30000  # Maximum number of moves if game is not finished before
-        self.num_simulations = 50  # Number of future moves self-simulated
+        self.max_moves = 1000  # Maximum number of moves if game is not finished before
+        self.num_simulations = 10  # Number of future moves self-simulated
         self.discount = 0.997  # Chronological discount of the reward
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
@@ -54,18 +54,18 @@ class MuZeroConfig:
 
         ### Network
         self.network = "resnet"  # "resnet" / "fullyconnected"
-        self.support_size = 100  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
+        self.support_size = 5  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
 
         # Residual Network
         self.downsample = "resnet"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
         self.blocks = 8  # Number of blocks in the ResNet
-        self.channels = 32  # Number of channels in the ResNet
-        self.reduced_channels_reward = 4  # Number of channels in reward head
-        self.reduced_channels_value = 4  # Number of channels in value head
-        self.reduced_channels_policy = 4  # Number of channels in policy head
-        self.resnet_fc_reward_layers = [16]  # Define the hidden layers in the reward head of the dynamic network
-        self.resnet_fc_value_layers = [16]  # Define the hidden layers in the value head of the prediction network
-        self.resnet_fc_policy_layers = [16]  # Define the hidden layers in the policy head of the prediction network
+        self.channels = 256  # Number of channels in the ResNet
+        self.reduced_channels_reward = 32  # Number of channels in reward head
+        self.reduced_channels_value = 32  # Number of channels in value head
+        self.reduced_channels_policy = 32  # Number of channels in policy head
+        self.resnet_fc_reward_layers = [128]  # Define the hidden layers in the reward head of the dynamic network
+        self.resnet_fc_value_layers = [128]  # Define the hidden layers in the value head of the prediction network
+        self.resnet_fc_policy_layers = [128]  # Define the hidden layers in the policy head of the prediction network
 
         # Fully Connected Network
         self.encoding_size = 10
@@ -91,21 +91,22 @@ class MuZeroConfig:
         self.momentum = 0.9  # Used only if optimizer is SGD
 
         # Exponential learning rate schedule
-        self.lr_init = 0.05  # Initial learning rate
+        self.lr_init = 0.005  # Initial learning rate
         self.lr_decay_rate = 0.1  # Set it to 1 to use a constant learning rate
-        self.lr_decay_steps = 350e3
+        # self.lr_decay_steps = 350e3
+        self.lr_decay_steps = 5e4
 
 
 
         ### Replay Buffer
-        self.replay_buffer_size = int(1e3)  # Number of self-play games to keep in the replay buffer
+        self.replay_buffer_size = 900  # Number of self-play games to keep in the replay buffer
         self.num_unroll_steps = 5  # Number of game moves to keep for every batch element
         self.td_steps = 10  # Number of steps in the future to take into account for calculating the target value
-        self.PER = True  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
+        self.PER = False  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
         self.PER_alpha = 1  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
 
         # Reanalyze (See paper appendix Reanalyse)
-        self.use_last_model_value = True  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
+        self.use_last_model_value = False  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
         self.reanalyse_on_gpu = False
 
 
@@ -124,7 +125,7 @@ class MuZeroConfig:
         Returns:
             Positive float.
         """
-        if trained_steps < 10:
+        if trained_steps < 100000:
             return 10.0
         if trained_steps < 500e3:
             return 1.0
@@ -158,7 +159,7 @@ class Game(AbstractGame):
         observation = cv2.resize(observation, (96, 96), interpolation=cv2.INTER_AREA)
         observation = numpy.asarray(observation, dtype="float32") / 255.0
         observation = numpy.moveaxis(observation, -1, 0)
-        return observation, reward, done
+        return observation, reward * 10, done
 
     def legal_actions(self):
         """

@@ -73,7 +73,7 @@ class MuZero:
         while True:
             ray.shutdown()
             print('Init cpus {}, gpus {}'.format(8, total_gpus))
-            ray.init(num_cpus=8, num_gpus=total_gpus, ignore_reinit_error=True)
+            ray.init(num_cpus=8, num_gpus=total_gpus, object_store_memory=1024*1024*1024, ignore_reinit_error=True)
 
             # Checkpoint and replay buffer used to initialize workers
             self.checkpoint = {
@@ -329,7 +329,7 @@ class MuZero:
 
         self.terminate_workers()
 
-        if self.config.save_model:
+        if False and self.config.save_model:
             # Persist replay buffer to disk
             print("\n\nPersisting replay buffer games to disk...")
             pickle.dump(
@@ -346,8 +346,8 @@ class MuZero:
             self.checkpoint = ray.get(
                 self.shared_storage_worker.get_checkpoint.remote()
             )
-        if self.replay_buffer_worker:
-            self.replay_buffer = ray.get(self.replay_buffer_worker.get_buffer.remote())
+        # if self.replay_buffer_worker:
+        #     self.replay_buffer = ray.get(self.replay_buffer_worker.get_buffer.remote())
 
         print("\nShutting down workers...")
 
