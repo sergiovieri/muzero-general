@@ -68,12 +68,12 @@ class MuZeroConfig:
         self.resnet_fc_policy_layers = [128]  # Define the hidden layers in the policy head of the prediction network
 
         # Fully Connected Network
-        self.encoding_size = 10
-        self.fc_representation_layers = []  # Define the hidden layers in the representation network
-        self.fc_dynamics_layers = [16]  # Define the hidden layers in the dynamics network
-        self.fc_reward_layers = [16]  # Define the hidden layers in the reward network
-        self.fc_value_layers = []  # Define the hidden layers in the value network
-        self.fc_policy_layers = []  # Define the hidden layers in the policy network
+        self.encoding_size = 16
+        self.fc_representation_layers = [256]  # Define the hidden layers in the representation network
+        self.fc_dynamics_layers = [64, 64]  # Define the hidden layers in the dynamics network
+        self.fc_reward_layers = [32]  # Define the hidden layers in the reward network
+        self.fc_value_layers = [32]  # Define the hidden layers in the value network
+        self.fc_policy_layers = [32]  # Define the hidden layers in the policy network
 
 
 

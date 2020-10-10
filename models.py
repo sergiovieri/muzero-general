@@ -35,6 +35,19 @@ class MuZeroNetwork:
                 config.support_size,
                 config.downsample,
             )
+        elif config.network == "jago":
+            return MuZeroJagoNetwork(
+                config.observation_shape,
+                config.stacked_observations,
+                len(config.action_space),
+                config.encoding_size,
+                config.fc_reward_layers,
+                config.fc_value_layers,
+                config.fc_policy_layers,
+                config.fc_representation_layers,
+                config.fc_dynamics_layers,
+                config.support_size,
+            )
         else:
             raise NotImplementedError(
                 'The network parameter should be "fullyconnected" or "resnet".'
@@ -732,6 +745,30 @@ class RepresentationJago(torch.nn.Module):
         x = self.fc(x)
         return x
 
+class RepresentationJagoCnn(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        fc_representation_layers,
+        encoding_size,
+    ):
+        super().__init__()
+        self.features = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels, 32, kernel_size=8, stride=4, padding=0), # 96 -> 23
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=0), # 23 -> 10
+            torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0), # 10 -> 8
+            torch.nn.ReLU(inplace=True),
+        )
+        self.conv_output_size = 4096
+        self.fc = mlp(self.conv_output_size, fc_representation_layers, encoding_size)
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(-1, self.conv_output_size)
+        x = self.fc(x)
+        return x
+
 class MuZeroJagoNetwork(AbstractNetwork):
     def __init__(
         self,
@@ -739,23 +776,37 @@ class MuZeroJagoNetwork(AbstractNetwork):
         stacked_observations,
         action_space_size,
         encoding_size,
+        fc_reward_layers,
+        fc_value_layers,
+        fc_policy_layers,
+        fc_representation_layers,
+        fc_dynamics_layers,
         support_size,
     ):
         super().__init__()
         self.action_space_size = action_space_size
         self.full_support_size = 2 * support_size + 1
 
+        # self.representation_network = torch.nn.DataParallel(
+        #     RepresentationJago(
+        #         observation_shape,
+        #         stacked_observations,
+        #         encoding_size,
+        #     )
+        # )
+
         self.representation_network = torch.nn.DataParallel(
-            RepresentationJago(
-                observation_shape,
-                stacked_observations,
+            RepresentationJagoCnn(
+                observation_shape[0] * (stacked_observations + 1)
+                + stacked_observations,
+                fc_representation_layers,
                 encoding_size,
             )
         )
 
         self.dynamics_encoded_state_network = torch.nn.DataParallel(
             mlp(
-                encoding_size + self.actions_space_size,
+                encoding_size + self.action_space_size,
                 fc_dynamics_layers,
                 encoding_size,
             )
@@ -816,10 +867,10 @@ class MuZeroJagoNetwork(AbstractNetwork):
             encoded_state,
         )
 
-        def recurrent_inference(self, encoded_state, action):
-            next_encoded_state, reward = self.dynamics(encoded_state, action)
-            policy_logits, value = self.prediction(next_encoded_state)
-            return value, reward, policy_logits, next_encoded_state
+    def recurrent_inference(self, encoded_state, action):
+        next_encoded_state, reward = self.dynamics(encoded_state, action)
+        policy_logits, value = self.prediction(next_encoded_state)
+        return value, reward, policy_logits, next_encoded_state
 
 
 def mlp(
