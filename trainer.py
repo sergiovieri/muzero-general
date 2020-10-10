@@ -190,14 +190,14 @@ class Trainer:
                 hidden_state, action_batch[:, i]
             )
             if mau is not None:
-                print('Target value', models.support_to_scalar(target_value[mau, i], self.config.support_size))
+                print('Target value', models.support_to_scalar(target_value[mau:mau+1, i], self.config.support_size))
                 # print(target_reward[mau, i])
                 # print(torch.nn.Softmax(dim=0)(reward[mau]))
                 print('Reward', models.support_to_scalar(reward[mau:mau+1], self.config.support_size))
                 print('Value', models.support_to_scalar(value[mau:mau+1], self.config.support_size))
                 # print(torch.nn.Softmax(dim=0)(reward[0]))
                 print('At 0')
-                print('Target value', models.support_to_scalar(target_value[0, i], self.config.support_size))
+                print('Target value', models.support_to_scalar(target_value[0:1, i], self.config.support_size))
                 print(models.support_to_scalar(reward[0:1], self.config.support_size))
                 print(models.support_to_scalar(value[0:1], self.config.support_size))
             target_state = self.model.initial_inference(observation_batch[:, i])[3].detach()
