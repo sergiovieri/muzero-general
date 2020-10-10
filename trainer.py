@@ -190,11 +190,16 @@ class Trainer:
                 hidden_state, action_batch[:, i]
             )
             if mau is not None:
-                print(target_reward[mau, i])
-                print(torch.nn.Softmax(dim=0)(reward[mau]))
-                print(models.support_to_scalar(reward[mau:mau+1], self.config.support_size))
-                print(torch.nn.Softmax(dim=0)(reward[0]))
+                print('Target value', models.support_to_scalar(target_value[mau, i], self.config.support_size))
+                # print(target_reward[mau, i])
+                # print(torch.nn.Softmax(dim=0)(reward[mau]))
+                print('Reward', models.support_to_scalar(reward[mau:mau+1], self.config.support_size))
+                print('Value', models.support_to_scalar(value[mau:mau+1], self.config.support_size))
+                # print(torch.nn.Softmax(dim=0)(reward[0]))
+                print('At 0')
+                print('Target value', models.support_to_scalar(target_value[0, i], self.config.support_size))
                 print(models.support_to_scalar(reward[0:1], self.config.support_size))
+                print(models.support_to_scalar(value[0:1], self.config.support_size))
             target_state = self.model.initial_inference(observation_batch[:, i])[3].detach()
             current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
             if i == 1:
@@ -284,7 +289,7 @@ class Trainer:
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
         # loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss #+ 0.01 * next_loss
-        loss = reward_loss #+ 0.01 * next_loss
+        loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
             loss *= weight_batch

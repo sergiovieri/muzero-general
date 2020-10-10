@@ -1,4 +1,6 @@
 import copy
+import gc
+import sys
 import time
 
 import numpy
@@ -55,10 +57,15 @@ class ReplayBuffer:
         self.num_played_steps += len(game_history.root_values)
         self.total_samples += len(game_history.root_values)
 
+        print('SIZE BUFF', sys.getsizeof(self.buffer))
+        print('SIZE ALL', sys.getsizeof(self))
+        print('LEN', len(self.buffer))
+
         if self.config.replay_buffer_size < len(self.buffer):
             del_id = self.num_played_games - len(self.buffer)
             self.total_samples -= len(self.buffer[del_id].root_values)
             del self.buffer[del_id]
+            gc.collect()
 
         if shared_storage:
             shared_storage.set_info.remote("num_played_games", self.num_played_games)

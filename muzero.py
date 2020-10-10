@@ -145,12 +145,15 @@ class MuZero:
 
         # Manage GPUs
         if 0 < self.num_gpus:
-            num_gpus_per_worker = self.num_gpus / (
+            total_required = (
                 self.config.train_on_gpu
                 + self.config.num_workers * self.config.selfplay_on_gpu
                 + log_in_tensorboard * self.config.selfplay_on_gpu
                 + self.config.use_last_model_value * self.config.reanalyse_on_gpu
             )
+            while total_required % self.num_gpus != 0:
+                total_required += 1
+            num_gpus_per_worker = self.num_gpus / total_required
             if 1 < num_gpus_per_worker:
                 num_gpus_per_worker = math.floor(num_gpus_per_worker)
         else:
