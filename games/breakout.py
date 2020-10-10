@@ -99,9 +99,9 @@ class MuZeroConfig:
 
 
         ### Replay Buffer
-        self.replay_buffer_size = 900  # Number of self-play games to keep in the replay buffer
+        self.replay_buffer_size = 500  # Number of self-play games to keep in the replay buffer
         self.num_unroll_steps = 5  # Number of game moves to keep for every batch element
-        self.td_steps = 10  # Number of steps in the future to take into account for calculating the target value
+        self.td_steps = 1000  # Number of steps in the future to take into account for calculating the target value
         self.PER = False  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
         self.PER_alpha = 1  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
 

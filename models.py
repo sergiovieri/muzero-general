@@ -357,8 +357,8 @@ class RepresentationNetwork(torch.nn.Module):
         self.resblocks = torch.nn.ModuleList(
             [ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
-        # self.conv2 = conv3x3(num_channels, num_channels)
-        # self.bn2 = torch.nn.BatchNorm2d(num_channels)
+        self.conv2 = conv3x3(num_channels, num_channels)
+        self.bn2 = torch.nn.BatchNorm2d(num_channels)
 
     def forward(self, x):
         if self.downsample:
@@ -371,8 +371,8 @@ class RepresentationNetwork(torch.nn.Module):
 
         for block in self.resblocks:
             x = block(x)
-        # x = self.conv2(x)
-        # x = self.bn2(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
         # if x.shape[0] == 1:
         #     print('represent', x)
         return x
@@ -404,6 +404,8 @@ class DynamicsNetwork(torch.nn.Module):
         self.fc = mlp(
             self.block_output_size_reward, fc_reward_layers, full_support_size,
         )
+        self.conv2 = conv3x3(num_channels, num_channels, bias=False)
+        self.bn2 = torch.nn.BatchNorm2d(num_channels)
 
     def forward(self, x):
         x = self.conv(x)
@@ -411,6 +413,8 @@ class DynamicsNetwork(torch.nn.Module):
         # x = torch.nn.functional.relu(x)
         for block in self.resblocks:
             x = block(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
         state = x
         x = self.conv1x1_reward(x)
         # x = self.bn_reward(x)
