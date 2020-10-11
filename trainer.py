@@ -76,6 +76,7 @@ class Trainer:
             index_batch, batch = ray.get(pipelined_batch)
             pipelined_batch = replay_buffer.get_batch.remote()
             print('Got batch')
+            print(f'Index {index_batch}')
             self.update_lr()
             (
                 priorities,
@@ -144,6 +145,7 @@ class Trainer:
         ) = batch
 
         print('Update weights')
+        print(f'Weight {weight_batch}')
         # Keep values as scalars for calculating the priorities for the prioritized replay
         target_value_scalar = numpy.array(target_value, dtype="float32")
         priorities = numpy.zeros_like(target_value_scalar)
@@ -198,6 +200,7 @@ class Trainer:
                 rr = models.support_to_scalar(reward[mau:mau+1], self.config.support_size).item()
                 tp = torch.nn.Softmax()(target_policy[mau, i]).detach().cpu().numpy()
                 debug_hist.append((tv, rv, tr, rr))
+                print(f'Weight {weight_batch[mau].item()}')
                 print(f'Target value {tv:.6f}')
                 print(f'Value {rv:.6f}')
                 print(f'Target reward {tr:.6f}')
@@ -207,14 +210,14 @@ class Trainer:
                 print(f'!Target value {models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item()}')
                 print(f'!Value {models.support_to_scalar(value[0:1], self.config.support_size).item()}')
                 print(f'!Reward {models.support_to_scalar(reward[0:1], self.config.support_size).item()}')
-            target_state = self.model.initial_inference(observation_batch[:, i])[3].detach()
-            current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
-            if i == 1:
-                next_loss = current_loss
-            elif i < observation_batch.shape[1]:
-                next_loss += current_loss
-            print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
-                    torch.nn.MSELoss()(target_state, ori_hidden_state).item())
+            # target_state = self.model.initial_inference(observation_batch[:, i])[3].detach()
+            # current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
+            # if i == 1:
+            #     next_loss = current_loss
+            # elif i < observation_batch.shape[1]:
+            #     next_loss += current_loss
+            # print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
+            #         torch.nn.MSELoss()(target_state, ori_hidden_state).item())
             # Scale the gradient at the start of the dynamics function (See paper appendix Training)
             hidden_state.register_hook(lambda grad: grad * 0.5)
             predictions.append((value, reward, policy_logits))
