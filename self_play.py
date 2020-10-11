@@ -55,7 +55,7 @@ class SelfPlay:
                 print('PLAY TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
                 # Take the best action (no exploration) in test mode
                 game_history = self.play_game(
-                    0,
+                    0.25,
                     self.config.temperature_threshold,
                     False,
                     "self" if len(self.config.players) == 1 else self.config.opponent,
