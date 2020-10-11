@@ -26,7 +26,7 @@ class MuZeroConfig:
         self.observation_shape = (3, 96, 96)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
         self.action_space = list(range(4))  # Fixed list of all possible actions. You should only edit the length
         self.players = list(range(1))  # List of players. You should only edit the length
-        self.stacked_observations = 3  # Number of previous observations and previous actions to add to the current observation
+        self.stacked_observations = 7  # Number of previous observations and previous actions to add to the current observation
 
         # Evaluate
         self.muzero_player = 0  # Turn Muzero begins to play (0: MuZero plays first, 1: MuZero plays second)
@@ -35,10 +35,10 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 3  # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 7  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = True if torch.cuda.is_available() else False
-        self.max_moves = 1000  # Maximum number of moves if game is not finished before
-        self.num_simulations = 20  # Number of future moves self-simulated
+        self.max_moves = 10000  # Maximum number of moves if game is not finished before
+        self.num_simulations = 25  # Number of future moves self-simulated
         self.discount = 0.99  # Chronological discount of the reward
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
@@ -82,7 +82,7 @@ class MuZeroConfig:
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
         self.training_steps = int(1000e3)  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 64  # Number of parts of games to train on at each training step
-        self.checkpoint_interval = 100  # Number of training steps before using the model for self-playing
+        self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.train_on_gpu = True if torch.cuda.is_available() else False  # Train on GPU if available
 

@@ -49,6 +49,17 @@ class SelfPlay:
                     0,
                 )
 
+                # Save to the shared storage
+                shared_storage.set_info.remote(
+                    {
+                        "episode_length": len(game_history.action_history) - 1,
+                        "total_reward": sum(game_history.reward_history),
+                        "mean_value": numpy.mean(
+                            [value for value in game_history.root_values if value]
+                        ),
+                    }
+                )
+
                 replay_buffer.save_game.remote(game_history, shared_storage)
 
             else:
@@ -435,7 +446,7 @@ class MCTS:
                 * (child.value() if len(self.config.players) == 1 else -child.value())
             )
         else:
-            value_score = 0
+            value_score = 1
 
         return prior_score + value_score
 
@@ -600,4 +611,4 @@ class MinMaxStats:
         if self.maximum > self.minimum:
             # We normalize only when we have set the maximum and minimum values
             return (value - self.minimum) / (self.maximum - self.minimum)
-        return value
+        return 0

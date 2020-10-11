@@ -221,18 +221,18 @@ class MuZero:
         Keep track of the training performance.
         """
         # Launch the test worker to get performance metrics
-        self.test_worker = self_play.SelfPlay.options(
-            num_cpus=0,
-            num_gpus=num_gpus,
-        ).remote(
-            self.checkpoint,
-            self.Game,
-            self.config,
-            self.config.seed + self.config.num_workers,
-        )
-        self.test_worker.continuous_self_play.remote(
-            self.shared_storage_worker, None, True
-        )
+        # self.test_worker = self_play.SelfPlay.options(
+        #     num_cpus=0,
+        #     num_gpus=num_gpus,
+        # ).remote(
+        #     self.checkpoint,
+        #     self.Game,
+        #     self.config,
+        #     self.config.seed + self.config.num_workers,
+        # )
+        # self.test_worker.continuous_self_play.remote(
+        #     self.shared_storage_worker, None, True
+        # )
 
         # Write everything in TensorBoard
         writer = SummaryWriter(self.config.results_path)
