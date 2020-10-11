@@ -167,6 +167,9 @@ class Trainer:
         # target_policy: batch, num_unroll_steps+1, len(action_space)
         # gradient_scale_batch: batch, num_unroll_steps+1
 
+        if self.training_step < 1000:
+            target_policy = torch.full_like(target_policy, 1 / len(self.config.action_space)).float().to(device)
+
 
         target_value = models.scalar_to_support(target_value, self.config.support_size)
         mau = None
@@ -198,7 +201,7 @@ class Trainer:
                 rv = models.support_to_scalar(value[mau:mau+1], self.config.support_size).item()
                 tr = models.support_to_scalar(torch.log(target_reward[mau:mau+1, i]), self.config.support_size).item()
                 rr = models.support_to_scalar(reward[mau:mau+1], self.config.support_size).item()
-                tp = torch.nn.Softmax()(target_policy[mau, i]).detach().cpu().numpy()
+                tp = target_policy[mau, i]
                 debug_hist.append((tv, rv, tr, rr))
                 print(f'Weight {weight_batch[mau].item()}')
                 print(f'Target value {tv:.6f}')
