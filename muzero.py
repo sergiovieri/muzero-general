@@ -401,7 +401,7 @@ class MuZero:
             results.append(
                 ray.get(
                     self_play_worker.play_game.remote(
-                        0,
+                        0.1,
                         0,
                         render,
                         opponent,

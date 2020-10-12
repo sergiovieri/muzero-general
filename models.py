@@ -829,7 +829,7 @@ class MuZeroJagoNetwork(AbstractNetwork):
 
     def representation(self, observation):
         encoded_state = self.representation_network(
-            observation.view(observation.shape[0], -1)
+            observation#.view(observation.shape[0], -1)
         )
         return encoded_state
 
