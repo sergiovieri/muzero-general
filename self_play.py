@@ -405,6 +405,11 @@ class MCTS:
             "max_tree_depth": max_tree_depth,
             "root_predicted_value": root_predicted_value,
         }
+        # print(f'MinMaxStats {min_max_stats.minimum}, {min_max_stats.maximum}')
+        # prior = [root.children[a].prior for a in root.children.keys()]
+        # policy = [root.children[a].visit_count for a in root.children.keys()]
+        # print(f'Prior {prior}')
+        # print(f'Policy {policy}')
         return root, extra_info
 
     def select_child(self, node, min_max_stats):
@@ -602,6 +607,7 @@ class MinMaxStats:
     def __init__(self):
         self.maximum = -float("inf")
         self.minimum = float("inf")
+        self.minimum = 0
 
     def update(self, value):
         self.maximum = max(self.maximum, value)
