@@ -182,6 +182,7 @@ class Game(AbstractGame):
             Initial observation of the game.
         """
         observation = self.env.reset()
+        # return self.step(1)[0]
         observation = cv2.resize(observation, (96, 96), interpolation=cv2.INTER_AREA)
         observation = numpy.asarray(observation, dtype="float32") / 255.0
         observation = numpy.moveaxis(observation, -1, 0)
