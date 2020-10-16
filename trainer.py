@@ -214,7 +214,7 @@ class Trainer:
                 print(f'!Target value {models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item()}')
                 print(f'!Value {models.support_to_scalar(value[0:1], self.config.support_size).item()}')
                 print(f'!Reward {models.support_to_scalar(reward[0:1], self.config.support_size).item()}')
-            # target_state = self.model.initial_inference(observation_batch[:, i])[3].detach()
+            # next_value, _, next_policy_logits, target_state = self.model.initial_inference(observation_batch[:, i])#[3].detach()
             # current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
             # if i == 1:
             #     next_loss = current_loss
@@ -224,7 +224,7 @@ class Trainer:
             #         torch.nn.MSELoss()(target_state, ori_hidden_state).item())
             # Scale the gradient at the start of the dynamics function (See paper appendix Training)
             hidden_state.register_hook(lambda grad: grad * 0.5)
-            predictions.append((value, reward, policy_logits))
+            predictions.append((value, reward, policy_logits))#, next_value, next_policy_logits))
         # predictions: num_unroll_steps+1, 3, batch, 2*support_size+1 | 2*support_size+1 | 9 (according to the 2nd dim)
 
         if mau is not None: print(f'Debug hist {debug_hist}')
@@ -283,7 +283,6 @@ class Trainer:
             current_policy_loss.register_hook(
                 lambda grad: grad / gradient_scale_batch[:, i]
             )
-
             value_loss += current_value_loss
             reward_loss += current_reward_loss
             policy_loss += current_policy_loss
@@ -302,7 +301,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss #+ 0.01 * next_loss
+        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss# + 0.01 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights

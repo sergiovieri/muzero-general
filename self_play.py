@@ -607,11 +607,12 @@ class MinMaxStats:
     def __init__(self):
         self.maximum = -float("inf")
         self.minimum = float("inf")
-        self.minimum = 0
+        # self.minimum = 0
 
     def update(self, value):
         self.maximum = max(self.maximum, value)
         self.minimum = min(self.minimum, value)
+        self.minimum = min(self.minimum, self.maximum / 2)
 
     def normalize(self, value):
         if self.maximum > self.minimum:
