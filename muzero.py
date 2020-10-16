@@ -81,7 +81,7 @@ class MuZero:
         while True:
             ray.shutdown()
             print('Init cpus {}, gpus {}'.format(8, total_gpus))
-            ray.init(num_cpus=8, num_gpus=total_gpus, object_store_memory=1024*1024*1024, ignore_reinit_error=True)
+            ray.init(num_cpus=8, num_gpus=total_gpus, ignore_reinit_error=True)
 
             # Checkpoint and replay buffer used to initialize workers
             self.checkpoint = {
@@ -444,19 +444,18 @@ class MuZero:
                 print(f"\nThere is no model saved in {checkpoint_path}.")
 
         # Load replay buffer
-        if replay_buffer_path:
-            if os.path.exists(replay_buffer_path):
-                with open(replay_buffer_path, "rb") as f:
-                    self.replay_buffer = pickle.load(f)
-                print(f"\nInitializing replay buffer with {replay_buffer_path}")
-            else:
-                print(
-                    f"Warning: Replay buffer path '{replay_buffer_path}' doesn't exist.  Using empty buffer."
-                )
-                self.checkpoint["training_step"] = 0
-                self.checkpoint["num_played_steps"] = 0
-                self.checkpoint["num_played_games"] = 0
-                self.checkpoint["num_reanalysed_games"] = 0
+        if replay_buffer_path and os.path.exists(replay_buffer_path):
+            with open(replay_buffer_path, "rb") as f:
+                self.replay_buffer = pickle.load(f)
+            print(f"\nInitializing replay buffer with {replay_buffer_path}")
+        else:
+            print(
+                f"Warning: Replay buffer path '{replay_buffer_path}' doesn't exist.  Using empty buffer."
+            )
+            self.checkpoint["training_step"] = 0
+            self.checkpoint["num_played_steps"] = 0
+            self.checkpoint["num_played_games"] = 0
+            self.checkpoint["num_reanalysed_games"] = 0
 
     def diagnose_model(self, horizon):
         """

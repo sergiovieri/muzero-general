@@ -749,18 +749,19 @@ class RepresentationJagoCnn(torch.nn.Module):
     def __init__(
         self,
         in_channels,
+        mid_channels,
         fc_representation_layers,
         encoding_size,
     ):
         super().__init__()
         self.features = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels, 32, kernel_size=8, stride=4, padding=0), # 96 -> 23
+            torch.nn.Conv2d(in_channels, mid_channels // 2, kernel_size=8, stride=4, padding=0), # 96 -> 23
             torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=0), # 23 -> 10
-            torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0), # 10 -> 8
+            torch.nn.Conv2d(mid_channels // 2, mid_channels, kernel_size=5, stride=2, padding=0), # 23 -> 10
+            torch.nn.Conv2d(mid_channels, mid_channels, kernel_size=3, stride=1, padding=0), # 10 -> 8
             torch.nn.ReLU(inplace=True),
         )
-        self.conv_output_size = 4096
+        self.conv_output_size = 8 * 8 * mid_channels
         self.fc = mlp(self.conv_output_size, fc_representation_layers, encoding_size)
 
     def forward(self, x):
@@ -799,6 +800,7 @@ class MuZeroJagoNetwork(AbstractNetwork):
             RepresentationJagoCnn(
                 observation_shape[0] * (stacked_observations + 1)
                 + stacked_observations,
+                256,
                 fc_representation_layers,
                 encoding_size,
             )
