@@ -634,7 +634,7 @@ if __name__ == "__main__":
 
                 done = False
                 while not done:
-                    print('Obs', observation)
+                    # print('Obs', observation)
                     action = env.human_to_action()
                     observation, reward, done = env.step(action)
                     print(f"\nAction: {env.action_to_string(action)}\nReward: {reward}")

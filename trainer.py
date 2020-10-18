@@ -173,7 +173,7 @@ class Trainer:
 
 
         target_value = models.scalar_to_support(target_value, self.config.support_size)
-        mau = None
+        mau = 0
         for i in range(target_reward.shape[0]):
             if target_reward[i][1:].sum() > 0.5:
                 mau = i
