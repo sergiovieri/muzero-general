@@ -361,6 +361,7 @@ class MCTS:
             )
 
         min_max_stats = MinMaxStats()
+        self.backpropagate([root], root_predicted_value, to_play, min_max_stats)
 
         max_tree_depth = 0
         for _ in range(self.config.num_simulations):
@@ -612,7 +613,7 @@ class MinMaxStats:
     def update(self, value):
         self.maximum = max(self.maximum, value)
         self.minimum = min(self.minimum, value)
-        self.minimum = min(self.minimum, self.maximum / 2)
+        self.minimum = min(self.minimum, self.maximum * 0.9)
 
     def normalize(self, value):
         if self.maximum > self.minimum:

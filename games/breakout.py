@@ -39,7 +39,7 @@ class MuZeroConfig:
         self.selfplay_on_gpu = True if torch.cuda.is_available() else False
         self.max_moves = 10000  # Maximum number of moves if game is not finished before
         self.num_simulations = 50  # Number of future moves self-simulated
-        self.discount = 0.99  # Chronological discount of the reward
+        self.discount = 0.999  # Chronological discount of the reward
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
         # Root prior exploration noise
@@ -53,19 +53,19 @@ class MuZeroConfig:
 
 
         ### Network
-        self.network = "jago"  # "resnet" / "fullyconnected"
+        self.network = "resnet"  # "resnet" / "fullyconnected"
         self.support_size = 10  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
 
         # Residual Network
         self.downsample = "resnet"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
         self.blocks = 8  # Number of blocks in the ResNet
         self.channels = 256  # Number of channels in the ResNet
-        self.reduced_channels_reward = 32  # Number of channels in reward head
-        self.reduced_channels_value = 32  # Number of channels in value head
-        self.reduced_channels_policy = 32  # Number of channels in policy head
-        self.resnet_fc_reward_layers = [128]  # Define the hidden layers in the reward head of the dynamic network
-        self.resnet_fc_value_layers = [128]  # Define the hidden layers in the value head of the prediction network
-        self.resnet_fc_policy_layers = [128]  # Define the hidden layers in the policy head of the prediction network
+        self.reduced_channels_reward = 64  # Number of channels in reward head
+        self.reduced_channels_value = 64  # Number of channels in value head
+        self.reduced_channels_policy = 64  # Number of channels in policy head
+        self.resnet_fc_reward_layers = [256]  # Define the hidden layers in the reward head of the dynamic network
+        self.resnet_fc_value_layers = [256]  # Define the hidden layers in the value head of the prediction network
+        self.resnet_fc_policy_layers = [256]  # Define the hidden layers in the policy head of the prediction network
 
         # Fully Connected Network
         self.encoding_size = 16
@@ -94,7 +94,7 @@ class MuZeroConfig:
         self.lr_init = 0.005  # Initial learning rate
         self.lr_decay_rate = 1  # Set it to 1 to use a constant learning rate
         # self.lr_decay_steps = 350e3
-        self.lr_decay_steps = 5e4
+        self.lr_decay_steps = 350e3
 
 
 
