@@ -176,9 +176,9 @@ class ReplayBuffer:
             position_probs = game_history.priorities / sum(game_history.priorities)
             position_index = numpy.random.choice(len(position_probs), p=position_probs)
             position_prob = position_probs[position_index]
-            position_index -= numpy.random.randint(0, self.config.num_unroll_steps)
-            if position_index < 0:
-                position_index = 0
+            # position_index -= numpy.random.randint(0, self.config.num_unroll_steps)
+            # if position_index < 0:
+            #     position_index = 0
 
         else:
             position_index = numpy.random.choice(len(game_history.root_values))
