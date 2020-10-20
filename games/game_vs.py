@@ -44,7 +44,10 @@ def make_vs(game, observation_shape):
         else:
           reward = 0
 
-        return self.make_observations(), reward * 4, True
+        print(f'Reward: {self.reward}, {reward}')
+        self.player = 1 - self.player
+
+        return self.make_observations(), reward * 3, True
 
       self.player = 1 - self.player
       return self.make_observations(), 0, False
@@ -63,7 +66,7 @@ def make_vs(game, observation_shape):
     def make_reward(self):
       return np.full(
         (1, self.observation_shape[1], self.observation_shape[2]),
-        self.reward[0] - self.reward[1],
+        self.reward[self.player] - self.reward[1 - self.player],
         dtype=np.float32,
       )
 

@@ -145,7 +145,8 @@ class Trainer:
         ) = batch
 
         print('Update weights')
-        print(f'Weight {weight_batch}')
+        if weight_batch:
+            print(f'Weight {weight_batch}')
         # Keep values as scalars for calculating the priorities for the prioritized replay
         target_value_scalar = numpy.array(target_value, dtype="float32")
         priorities = numpy.zeros_like(target_value_scalar)
@@ -204,7 +205,6 @@ class Trainer:
                 rr = models.support_to_scalar(reward[mau:mau+1], self.config.support_size).item()
                 tp = target_policy[mau, i]
                 debug_hist.append((tv, rv, tr, rr))
-                print(f'Weight {weight_batch[mau].item()}')
                 print(f'Target value {tv:.6f}')
                 print(f'Value {rv:.6f}')
                 print(f'Target reward {tr:.6f}')
