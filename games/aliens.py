@@ -26,7 +26,7 @@ class MuZeroConfig:
         self.observation_shape = (3, 96, 96)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
         self.action_space = action_space  # Fixed list of all possible actions. You should only edit the length
         self.players = list(range(1))  # List of players. You should only edit the length
-        self.stacked_observations = 7  # Number of previous observations and previous actions to add to the current observation
+        self.stacked_observations = 3  # Number of previous observations and previous actions to add to the current observation
 
         print(f'Action space detected: {self.action_space}')
         print(f'Action meanings: {gym.make(game_name).unwrapped.get_action_meanings()}')
@@ -38,11 +38,11 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 7  # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 3  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = True if torch.cuda.is_available() else False
         self.max_moves = 10000  # Maximum number of moves if game is not finished before
         self.num_simulations = 50  # Number of future moves self-simulated
-        self.discount = 0.999  # Chronological discount of the reward
+        self.discount = 0.99  # Chronological discount of the reward
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
         # Root prior exploration noise
@@ -85,7 +85,7 @@ class MuZeroConfig:
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
         self.training_steps = int(1000e3)  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 64  # Number of parts of games to train on at each training step
-        self.checkpoint_interval = 100  # Number of training steps before using the model for self-playing
+        self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 1  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.train_on_gpu = True if torch.cuda.is_available() else False  # Train on GPU if available
 
@@ -94,7 +94,7 @@ class MuZeroConfig:
         self.momentum = 0.9  # Used only if optimizer is SGD
 
         # Exponential learning rate schedule
-        self.lr_init = 0.005  # Initial learning rate
+        self.lr_init = 0.001  # Initial learning rate
         self.lr_decay_rate = 0.1  # Set it to 1 to use a constant learning rate
         # self.lr_decay_steps = 350e3
         self.lr_decay_steps = 350e3
@@ -102,14 +102,14 @@ class MuZeroConfig:
 
 
         ### Replay Buffer
-        self.replay_buffer_size = 250  # Number of self-play games to keep in the replay buffer
+        self.replay_buffer_size = 50  # Number of self-play games to keep in the replay buffer
         self.num_unroll_steps = 5  # Number of game moves to keep for every batch element
-        self.td_steps = 10  # Number of steps in the future to take into account for calculating the target value
+        self.td_steps = 5  # Number of steps in the future to take into account for calculating the target value
         self.PER = True  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
         self.PER_alpha = 1  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
 
         # Reanalyze (See paper appendix Reanalyse)
-        self.use_last_model_value = False  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
+        self.use_last_model_value = True  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
         self.reanalyse_on_gpu = False
 
 
@@ -128,7 +128,7 @@ class MuZeroConfig:
         Returns:
             Positive float.
         """
-        if trained_steps < 1000:
+        if trained_steps < 100:
             return 10.0
         if trained_steps < 500e3:
             return 1.0
@@ -162,7 +162,7 @@ class Game(AbstractGame):
         observation = cv2.resize(observation, (96, 96), interpolation=cv2.INTER_AREA)
         observation = numpy.asarray(observation, dtype="float32") / 255.0
         observation = numpy.moveaxis(observation, -1, 0)
-        return observation, reward * 10, done
+        return observation, reward, done
 
     def legal_actions(self):
         """
