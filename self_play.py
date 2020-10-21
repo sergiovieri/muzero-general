@@ -613,7 +613,7 @@ class MinMaxStats:
     def update(self, value):
         self.maximum = max(self.maximum, value)
         self.minimum = min(self.minimum, value)
-        self.minimum = min(self.minimum, self.maximum * 0.9)
+        # self.minimum = min(self.minimum, self.maximum * 0.9)
 
     def normalize(self, value):
         if self.maximum > self.minimum:
