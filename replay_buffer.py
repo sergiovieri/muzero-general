@@ -303,6 +303,7 @@ class Reanalyse:
     def __init__(self, initial_checkpoint, config):
         self.config = config
 
+        print('Reanalyse!!!!!!!!!!!!!!!!!!!!!!!')
         print('Ray gpus', ray.get_gpu_ids())
         print('Torch gpu:', torch.cuda.is_available())
         import os
@@ -329,6 +330,7 @@ class Reanalyse:
         ) < self.config.training_steps and not ray.get(
             shared_storage.get_info.remote("terminate")
         ):
+            print('Reanalyse loop!!!!!!!!!')
             self.model.set_weights(ray.get(shared_storage.get_info.remote("weights")))
 
             game_id, game_history, _ = ray.get(
@@ -336,7 +338,7 @@ class Reanalyse:
             )
 
             # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
-            if self.config.use_last_model_value:
+            if False and self.config.use_last_model_value:
                 observations = [
                     game_history.get_stacked_observations(
                         i, self.config.stacked_observations
@@ -355,6 +357,23 @@ class Reanalyse:
                 )
                 game_history.reanalysed_predicted_root_values = (
                     torch.squeeze(values).detach().cpu().numpy()
+                )
+
+            if self.config.use_last_model_value:
+                new_values = []
+                for i in range(len(game_history.root_values)):
+                    observation = [game_history.get_stacked_observations(
+                        i, self.config.stacked_observations
+                    )]
+                    observation = torch.tensor(observation).float().to(next(self.model.parameters()).device)
+                    value = models.support_to_scalar(
+                        self.model.initial_inference(observation)[0],
+                        self.config.support_size,
+                    ).item()
+                    new_values.append(value)
+
+                game_history.reanalysed_predicted_root_values = (
+                    numpy.array(new_values)
                 )
 
             replay_buffer.update_game_history.remote(game_id, game_history)
