@@ -24,7 +24,7 @@ class MuZeroConfig:
 
         ### Game
         self.observation_shape = (3, 96, 96)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
-        self.action_space = action_space  # Fixed list of all possible actions. You should only edit the length
+        self.action_space = list(range(6))#action_space  # Fixed list of all possible actions. You should only edit the length
         self.players = list(range(1))  # List of players. You should only edit the length
         self.stacked_observations = 7  # Number of previous observations and previous actions to add to the current observation
 
@@ -38,11 +38,11 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 3  # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 5  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = True if torch.cuda.is_available() else False
         self.max_moves = 10000  # Maximum number of moves if game is not finished before
-        self.num_simulations = 50  # Number of future moves self-simulated
-        self.discount = 0.997  # Chronological discount of the reward
+        self.num_simulations = 20  # Number of future moves self-simulated
+        self.discount = 0.9  # Chronological discount of the reward
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
         # Root prior exploration noise
@@ -56,22 +56,22 @@ class MuZeroConfig:
 
 
         ### Network
-        self.network = "resnet"  # "resnet" / "fullyconnected"
+        self.network = "jago"  # "resnet" / "fullyconnected"
         self.support_size = 50  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
 
         # Residual Network
         self.downsample = "resnet"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
         self.blocks = 8  # Number of blocks in the ResNet
-        self.channels = 256  # Number of channels in the ResNet
-        self.reduced_channels_reward = 64  # Number of channels in reward head
-        self.reduced_channels_value = 64  # Number of channels in value head
-        self.reduced_channels_policy = 64  # Number of channels in policy head
-        self.resnet_fc_reward_layers = [256]  # Define the hidden layers in the reward head of the dynamic network
-        self.resnet_fc_value_layers = [256]  # Define the hidden layers in the value head of the prediction network
-        self.resnet_fc_policy_layers = [256]  # Define the hidden layers in the policy head of the prediction network
+        self.channels = 128  # Number of channels in the ResNet
+        self.reduced_channels_reward = 32  # Number of channels in reward head
+        self.reduced_channels_value = 32  # Number of channels in value head
+        self.reduced_channels_policy = 32  # Number of channels in policy head
+        self.resnet_fc_reward_layers = [128]  # Define the hidden layers in the reward head of the dynamic network
+        self.resnet_fc_value_layers = [128]  # Define the hidden layers in the value head of the prediction network
+        self.resnet_fc_policy_layers = [128]  # Define the hidden layers in the policy head of the prediction network
 
         # Fully Connected Network
-        self.encoding_size = 16
+        self.encoding_size = 128
         self.fc_representation_layers = [256, 256]  # Define the hidden layers in the representation network
         self.fc_dynamics_layers = [256, 256]  # Define the hidden layers in the dynamics network
         self.fc_reward_layers = [256, 256]  # Define the hidden layers in the reward network
@@ -84,9 +84,9 @@ class MuZeroConfig:
         self.results_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../results", os.path.basename(__file__)[:-3], datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
         self.training_steps = int(1000e3)  # Total number of training steps (ie weights update according to a batch)
-        self.batch_size = 128  # Number of parts of games to train on at each training step
-        self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
-        self.value_loss_weight = 1  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
+        self.batch_size = 256  # Number of parts of games to train on at each training step
+        self.checkpoint_interval = 100  # Number of training steps before using the model for self-playing
+        self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.train_on_gpu = True if torch.cuda.is_available() else False  # Train on GPU if available
 
         self.optimizer = "SGD"  # "Adam" or "SGD". Paper uses SGD
@@ -104,12 +104,12 @@ class MuZeroConfig:
         ### Replay Buffer
         self.replay_buffer_size = 50  # Number of self-play games to keep in the replay buffer
         self.num_unroll_steps = 5  # Number of game moves to keep for every batch element
-        self.td_steps = 5  # Number of steps in the future to take into account for calculating the target value
+        self.td_steps = 10000  # Number of steps in the future to take into account for calculating the target value
         self.PER = True  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
-        self.PER_alpha = 1  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
+        self.PER_alpha = 0.5  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
 
         # Reanalyze (See paper appendix Reanalyse)
-        self.use_last_model_value = True  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
+        self.use_last_model_value = False  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
         self.reanalyse_on_gpu = False
 
 
@@ -175,6 +175,7 @@ class Game(AbstractGame):
         Returns:
             An array of integers, subset of the action space.
         """
+        return list(range(6))
         return action_space
 
     def reset(self):
@@ -185,6 +186,8 @@ class Game(AbstractGame):
             Initial observation of the game.
         """
         observation = self.env.reset()
+        for _ in range(30):
+            observation = self.env.step(0)[0]
         # return self.step(1)[0]
         observation = cv2.resize(observation, (96, 96), interpolation=cv2.INTER_AREA)
         observation = numpy.asarray(observation, dtype="float32") / 255.0

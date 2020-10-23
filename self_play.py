@@ -35,7 +35,6 @@ class SelfPlay:
             shared_storage.get_info.remote("terminate")
         ):
             self.model.set_weights(ray.get(shared_storage.get_info.remote("weights")))
-
             if not test_mode:
                 game_history = self.play_game(
                     self.config.visit_softmax_temperature_fn(
@@ -571,14 +570,14 @@ class GameHistory:
         # Convert to positive index
         index = index % len(self.observation_history)
 
-        stacked_observations = self.observation_history[index].astype(numpy.float32) / 255
+        stacked_observations = self.observation_history[index].astype(numpy.float32)# / 255
         for past_observation_index in reversed(
             range(index - num_stacked_observations, index)
         ):
             if 0 <= past_observation_index:
                 previous_observation = numpy.concatenate(
                     (
-                        self.observation_history[past_observation_index] / 255,
+                        self.observation_history[past_observation_index],# / 255,
                         [
                             numpy.ones_like(stacked_observations[0])
                             * self.action_history[past_observation_index + 1]

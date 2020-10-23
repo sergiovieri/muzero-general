@@ -119,7 +119,7 @@ class ReplayBuffer:
                 * len(actions)
             )
             if self.config.PER:
-                weight_batch.append((1 / (self.total_samples * game_prob * pos_prob)) ** 0.5)
+                weight_batch.append((1 / (self.total_samples * game_prob * pos_prob)) ** 1.0)
 
         if False and self.config.PER:
             weight_batch = numpy.array(weight_batch, dtype="float32") / max(
@@ -256,14 +256,18 @@ class ReplayBuffer:
         Generate targets for every unroll steps.
         """
         target_values, target_rewards, target_policies, actions = [], [], [], []
+        sum_rewards = 0
         for current_index in range(
             state_index, state_index + self.config.num_unroll_steps + 1
         ):
             value = self.compute_target_value(game_history, current_index)
 
             if current_index < len(game_history.root_values):
-                target_values.append(value)
-                target_rewards.append(game_history.reward_history[current_index])
+                sum_rewards += game_history.reward_history[current_index]
+                
+                target_values.append(value + sum_rewards)
+                target_rewards.append(sum_rewards)
+                # target_rewards.append(game_history.reward_history[current_index])
                 target_policies.append(game_history.child_visits[current_index])
                 actions.append(game_history.action_history[current_index])
             elif current_index == len(game_history.root_values):
