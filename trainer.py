@@ -63,7 +63,7 @@ class Trainer:
 
     def continuous_update_weights(self, replay_buffer, shared_storage):
         # Wait for the replay buffer to be filled
-        while ray.get(shared_storage.get_info.remote("num_played_games")) < 1:
+        while ray.get(shared_storage.get_info.remote("num_played_games")) < 10:
             time.sleep(0.1)
 
         pipelined_batch = replay_buffer.get_batch.remote()
@@ -74,8 +74,8 @@ class Trainer:
         ):
             print('Start train loop')
             index_batch, batch = ray.get(pipelined_batch)
-            pipelined_batch = replay_buffer.get_batch.remote()
             print('Got batch')
+            pipelined_batch = replay_buffer.get_batch.remote()
             print(f'Index {index_batch}')
             self.update_lr()
             (
@@ -168,7 +168,7 @@ class Trainer:
         # gradient_scale_batch: batch, num_unroll_steps+1
 
         print(f'Ori {target_policy[:4].detach().cpu().numpy()}')
-        if self.training_step < 1000:
+        if self.training_step < 100:
             target_policy = torch.full_like(target_policy, 1 / len(self.config.action_space)).float().to(device)
 
 

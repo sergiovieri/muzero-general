@@ -89,15 +89,15 @@ class Game(AbstractGame):
             done = self.ale.game_over()
             if done:
                 break
-            observation = frame_buffer.max(0)
-            # self.state_buffer.append(observation)
-            # Detect loss of life as terminal in training mode
-            if self.training:
-                lives = self.ale.lives()
-                if lives < self.lives and lives > 0:  # Lives > 0 for Q*bert
-                    self.life_termination = not done  # Only set flag when not truly done
-                    done = True
-                self.lives = lives
+        observation = frame_buffer.max(0)
+        # self.state_buffer.append(observation)
+        # Detect loss of life as terminal in training mode
+        if self.training:
+            lives = self.ale.lives()
+            if lives < self.lives and lives > 0:  # Lives > 0 for Q*bert
+                self.life_termination = not done  # Only set flag when not truly done
+                done = True
+            self.lives = lives
         # Return state, reward, done
         self.last = observation
         return numpy.expand_dims(observation, axis=0), reward, done
@@ -142,7 +142,7 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 7  # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 5  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = True if torch.cuda.is_available() else False
         self.max_moves = 108000  # Maximum number of moves if game is not finished before
         self.num_simulations = 20  # Number of future moves self-simulated
@@ -164,7 +164,7 @@ class MuZeroConfig:
         self.support_size = 100  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
 
         # Residual Network
-        self.downsample = "resnet"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
+        self.downsample = "CNN"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
         self.blocks = 8  # Number of blocks in the ResNet
         self.channels = 128  # Number of channels in the ResNet
         self.reduced_channels_reward = 32  # Number of channels in reward head
@@ -206,7 +206,7 @@ class MuZeroConfig:
 
 
         ### Replay Buffer
-        self.replay_buffer_size = 50  # Number of self-play games to keep in the replay buffer
+        self.replay_buffer_size = 100  # Number of self-play games to keep in the replay buffer
         self.num_unroll_steps = 5  # Number of game moves to keep for every batch element
         self.td_steps = 10  # Number of steps in the future to take into account for calculating the target value
         self.PER = True  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
