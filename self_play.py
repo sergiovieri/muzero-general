@@ -571,14 +571,14 @@ class GameHistory:
         # Convert to positive index
         index = index % len(self.observation_history)
 
-        stacked_observations = self.observation_history[index].copy()
+        stacked_observations = self.observation_history[index].astype(numpy.float32) / 255
         for past_observation_index in reversed(
             range(index - num_stacked_observations, index)
         ):
             if 0 <= past_observation_index:
                 previous_observation = numpy.concatenate(
                     (
-                        self.observation_history[past_observation_index],
+                        self.observation_history[past_observation_index] / 255,
                         [
                             numpy.ones_like(stacked_observations[0])
                             * self.action_history[past_observation_index + 1]
