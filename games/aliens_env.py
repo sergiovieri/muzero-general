@@ -109,8 +109,8 @@ class Game(AbstractGame):
         self.env.close()
 
     def render(self):
-        cv2.imshow('obs', self.last)
-        # cv2.imshow('screen', self.ale.getScreenRGB()[:, :, ::-1])
+        # cv2.imshow('obs', self.last)
+        cv2.imshow('screen', self.ale.getScreenRGB()[:, :, ::-1])
         cv2.waitKey(1)
 
     def close(self):
@@ -164,7 +164,7 @@ class MuZeroConfig:
         self.support_size = 100  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
 
         # Residual Network
-        self.downsample = "CNN"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
+        self.downsample = "resnet"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
         self.blocks = 8  # Number of blocks in the ResNet
         self.channels = 128  # Number of channels in the ResNet
         self.reduced_channels_reward = 32  # Number of channels in reward head
