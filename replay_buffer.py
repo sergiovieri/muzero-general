@@ -264,10 +264,9 @@ class ReplayBuffer:
 
             if current_index < len(game_history.root_values):
                 sum_rewards += game_history.reward_history[current_index]
-                
                 target_values.append(value + sum_rewards)
-                target_rewards.append(sum_rewards)
-                # target_rewards.append(game_history.reward_history[current_index])
+                # target_rewards.append(sum_rewards)
+                target_rewards.append(game_history.reward_history[current_index])
                 target_policies.append(game_history.child_visits[current_index])
                 actions.append(game_history.action_history[current_index])
             elif current_index == len(game_history.root_values):

@@ -63,7 +63,7 @@ class Trainer:
 
     def continuous_update_weights(self, replay_buffer, shared_storage):
         # Wait for the replay buffer to be filled
-        while ray.get(shared_storage.get_info.remote("num_played_games")) < 10:
+        while ray.get(shared_storage.get_info.remote("num_played_games")) < 1:
             time.sleep(0.1)
 
         pipelined_batch = replay_buffer.get_batch.remote()
@@ -76,7 +76,7 @@ class Trainer:
             index_batch, batch = ray.get(pipelined_batch)
             print('Got batch')
             pipelined_batch = replay_buffer.get_batch.remote()
-            print(f'Index {index_batch}')
+            # print(f'Index {index_batch}')
             self.update_lr()
             (
                 priorities,
@@ -145,7 +145,7 @@ class Trainer:
         ) = batch
 
         print('Update weights')
-        print(f'Weight {weight_batch}')
+        print(f'Weight {weight_batch[:8]}')
         # Keep values as scalars for calculating the priorities for the prioritized replay
         target_value_scalar = numpy.array(target_value, dtype="float32")
         priorities = numpy.zeros_like(target_value_scalar)
@@ -315,6 +315,9 @@ class Trainer:
         self.optimizer.step()
         self.training_step += 1
 
+        # for name, param in self.model.named_parameters():
+        #     print(name, param.grad.abs().mean().item(), param.data.abs().mean().item())
+
         return (
             priorities,
             # For log purpose
@@ -328,7 +331,7 @@ class Trainer:
         """
         Update learning rate
         """
-        warmup = 1000
+        warmup = 100
         if self.training_step < warmup:
             lr = self.config.lr_init * (self.training_step + 1) / warmup
         else:
@@ -362,6 +365,7 @@ class Trainer:
             if not param.requires_grad:
                 print(f'FROZEN {name}') # frozen weights
                 continue
-            if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list: no_decay.append(param)
+            if len(param.shape) == 1 or name.endswith(".bias") or "bn" in name or name in skip_list:
+                no_decay.append(param)
             else: decay.append(param)
         return [{'params': no_decay, 'weight_decay': 0.}, {'params': decay, 'weight_decay': l2_value}] 
