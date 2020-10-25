@@ -514,6 +514,7 @@ class Node:
             torch.tensor([policy_logits[0][a] for a in actions]), dim=0
         ).tolist()
         policy = {a: policy_values[i] for i, a in enumerate(actions)}
+        # policy = {a: 1.0 / len(actions) for i, a in enumerate(actions)}
         for action, p in policy.items():
             self.children[action] = Node(p)
 
@@ -571,14 +572,14 @@ class GameHistory:
         # Convert to positive index
         index = index % len(self.observation_history)
 
-        stacked_observations = self.observation_history[index].astype(numpy.float32)# / 255
+        stacked_observations = self.observation_history[index].astype(numpy.float32) / 255
         for past_observation_index in reversed(
             range(index - num_stacked_observations, index)
         ):
             if 0 <= past_observation_index:
                 previous_observation = numpy.concatenate(
                     (
-                        self.observation_history[past_observation_index],# / 255,
+                        self.observation_history[past_observation_index] / 255,
                         [
                             numpy.ones_like(stacked_observations[0])
                             * self.action_history[past_observation_index + 1]
@@ -613,7 +614,7 @@ class MinMaxStats:
     def update(self, value):
         self.maximum = max(self.maximum, value)
         self.minimum = min(self.minimum, value)
-        # self.minimum = min(self.minimum, self.maximum * 0.9)
+        self.minimum = min(self.minimum, self.maximum * 0.99 - 1e-3)
 
     def normalize(self, value):
         if self.maximum > self.minimum:
