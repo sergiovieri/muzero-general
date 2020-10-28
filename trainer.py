@@ -63,7 +63,7 @@ class Trainer:
 
     def continuous_update_weights(self, replay_buffer, shared_storage):
         # Wait for the replay buffer to be filled
-        while ray.get(shared_storage.get_info.remote("num_played_games")) < 1:
+        while ray.get(shared_storage.get_info.remote("num_played_games")) < 10:
             time.sleep(0.1)
 
         pipelined_batch = replay_buffer.get_batch.remote()
@@ -168,7 +168,7 @@ class Trainer:
         # gradient_scale_batch: batch, num_unroll_steps+1
 
         print(f'Ori {target_policy[:4].detach().cpu().numpy()}')
-        if self.training_step < 100:
+        if self.training_step < 1000:
             target_policy = torch.full_like(target_policy, 1 / len(self.config.action_space)).float().to(device)
 
 
@@ -365,7 +365,10 @@ class Trainer:
             if not param.requires_grad:
                 print(f'FROZEN {name}') # frozen weights
                 continue
-            if len(param.shape) == 1 or name.endswith(".bias") or "bn" in name or name in skip_list:
+            if (len(param.shape) == 1 or name.endswith(".bias") or "bn" in name or name in skip_list) and ("fc" not in name):
                 no_decay.append(param)
-            else: decay.append(param)
+                print('-', name)
+            else:
+                decay.append(param)
+                print('+', name)
         return [{'params': no_decay, 'weight_decay': 0.}, {'params': decay, 'weight_decay': l2_value}] 
