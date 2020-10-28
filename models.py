@@ -268,7 +268,7 @@ class ResidualBlock(torch.nn.Module):
 
 # Convolution block
 class ConvolutionBlock(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, relu=True, zero_init=False):
         super().__init__()
         self.conv = torch.nn.Conv2d(
             in_channels,
@@ -279,11 +279,15 @@ class ConvolutionBlock(torch.nn.Module):
             bias=False,
         )
         self.bn = torch.nn.GroupNorm(G, out_channels)
+        self.relu = relu
+        if zero_init:
+            self.bn.weight.data.fill_(0)
 
     def forward(self, x):
         x = self.conv(x)
         x = self.bn(x)
-        x = torch.nn.functional.relu(x)
+        if self.relu:
+            x = torch.nn.functional.relu(x)
         return x
 
 # Downsample observations before representation network (See paper appendix Network Architecture)
@@ -385,6 +389,7 @@ class RepresentationNetwork(torch.nn.Module):
         self.resblocks = torch.nn.ModuleList(
             [ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
+        self.hidden_state_conv = ConvolutionBlock(num_channels, num_channels, relu=False)
 
     def forward(self, x):
         if self.downsample:
@@ -395,6 +400,7 @@ class RepresentationNetwork(torch.nn.Module):
 
         for block in self.resblocks:
             x = block(x)
+        x = self.hidden_state_conv(x)
         return x
 
 
@@ -417,8 +423,9 @@ class DynamicsNetwork(torch.nn.Module):
         self.resblocks = torch.nn.ModuleList(
             [ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
+        self.hidden_state_conv = ConvolutionBlock(num_channels, num_channels, relu=False, zero_init=True)
 
-        self.bn_reward = torch.nn.GroupNorm(G, num_channels)
+        # self.bn_reward = torch.nn.GroupNorm(G, num_channels)
         # self.conv1x1_reward = torch.nn.Conv2d(num_channels, reduced_channels_reward, 1)
         self.conv1x1_reward = ConvolutionBlock(num_channels, reduced_channels_reward, kernel_size=1, padding=0)
         self.block_output_size_reward = block_output_size_reward
@@ -427,11 +434,14 @@ class DynamicsNetwork(torch.nn.Module):
         )
 
     def forward(self, x):
+        inp = x
         x = self.conv(x)
         for block in self.resblocks:
             x = block(x)
+        x = self.hidden_state_conv(x)
+        x += inp[:,:x.shape[1]]
         state = x
-        x = self.bn_reward(x)
+        # x = self.bn_reward(x)
         x = self.conv1x1_reward(x)
         # x = torch.nn.functional.relu(x)
         x = x.view(-1, self.block_output_size_reward)
@@ -566,7 +576,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
             )
         )
 
-        self.hidden_state_bn = torch.nn.GroupNorm(G, num_channels)
+        # self.hidden_state_bn = torch.nn.GroupNorm(G, num_channels)
 
         for m in self.modules():
             if isinstance(m, torch.nn.Conv2d):
@@ -578,7 +588,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
 
     def representation(self, observation):
         encoded_state = self.representation_network(observation)
-        encoded_state = self.hidden_state_bn(encoded_state)
+        # encoded_state = self.hidden_state_bn(encoded_state)
         return encoded_state
 
         # Scale encoded state between [0, 1] (See appendix paper Training)
@@ -621,7 +631,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
 
         x = torch.cat((encoded_state, action_one_hot), dim=1)
         next_encoded_state, reward = self.dynamics_network(x)
-        next_encoded_state = self.hidden_state_bn(next_encoded_state)
+        # next_encoded_state = self.hidden_state_bn(next_encoded_state)
         return next_encoded_state, reward
 
         # Scale encoded state between [0, 1] (See paper appendix Training)
