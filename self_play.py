@@ -139,6 +139,11 @@ class SelfPlay:
         if render:
             self.game.render()
 
+        prev_action = 0
+        repeat_left = 0
+        repeat_chance = 0.1
+        repeat_amount = 7
+
         with torch.no_grad():
             while (
                 not done and len(game_history.action_history) <= self.config.max_moves
@@ -170,6 +175,13 @@ class SelfPlay:
                         or len(game_history.action_history) < temperature_threshold
                         else 0,
                     )
+
+                    if repeat_left > 0:
+                        repeat_left -= 1
+                        action = prev_action
+                    elif numpy.random.rand() < repeat_chance:
+                        repeat_left = repeat_amount
+                        prev_action = action
 
                     if render:
                         print(f'Tree depth: {mcts_info["max_tree_depth"]}')
