@@ -98,6 +98,8 @@ class MuZero:
                 "value_loss": 0,
                 "reward_loss": 0,
                 "policy_loss": 0,
+                "grad_norm": 0,
+                "l2_norm": 0,
                 "num_played_games": 0,
                 "num_played_steps": 0,
                 "num_reanalysed_games": 0,
@@ -268,6 +270,8 @@ class MuZero:
             "value_loss",
             "reward_loss",
             "policy_loss",
+            "grad_norm",
+            "l2_norm",
             "num_played_games",
             "num_played_steps",
             "num_reanalysed_games",
@@ -329,6 +333,8 @@ class MuZero:
                 writer.add_scalar("3.Loss/Value_loss", info["value_loss"], counter)
                 writer.add_scalar("3.Loss/Reward_loss", info["reward_loss"], counter)
                 writer.add_scalar("3.Loss/Policy_loss", info["policy_loss"], counter)
+                writer.add_scalar("3.Loss/Grad_norm", info["grad_norm"], counter)
+                writer.add_scalar("3.Loss/L2_norm", info["l2_norm"], counter)
                 print(
                     f'Last test reward: {info["total_reward"]:.2f}. Training step: {info["training_step"]}/{self.config.training_steps}. Played games: {info["num_played_games"]}. Loss: {info["total_loss"]:.2f}',
                     end="\r",

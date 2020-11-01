@@ -64,7 +64,7 @@ class Game(AbstractGame):
             # Reset internals
             self.ale.reset_game()
             # Perform up to 30 random no-ops before starting
-            for _ in range(random.randrange(30)):
+            for _ in range(random.randrange(7) * 4):
                 self.ale.act(0)  # Assumes raw action 0 is always no-op
                 if self.ale.game_over():
                     self.ale.reset_game()
@@ -208,12 +208,12 @@ class MuZeroConfig:
         ### Replay Buffer
         self.replay_buffer_size = 500  # Number of self-play games to keep in the replay buffer
         self.num_unroll_steps = 5  # Number of game moves to keep for every batch element
-        self.td_steps = 10  # Number of steps in the future to take into account for calculating the target value
+        self.td_steps = 1  # Number of steps in the future to take into account for calculating the target value
         self.PER = True  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
         self.PER_alpha = 0.5  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
 
         # Reanalyze (See paper appendix Reanalyse)
-        self.use_last_model_value = False  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
+        self.use_last_model_value = True  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
         self.reanalyse_on_gpu = False
 
 
@@ -232,8 +232,8 @@ class MuZeroConfig:
         Returns:
             Positive float.
         """
-        if trained_steps < 1000:
-            return 10.0
+        if trained_steps < 1000000:
+            return 1.0
         if trained_steps < 500e3:
             return 1.0
         elif trained_steps < 750e3:

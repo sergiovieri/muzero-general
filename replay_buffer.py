@@ -99,11 +99,13 @@ class ReplayBuffer:
 
             for i in range(game_pos, game_pos + self.config.num_unroll_steps + 1):
                 # if i >= len(game_history.observation_history): break
-                if i > game_pos: break
+                # if i > game_pos: break
                 cpos = min(i, len(game_history.observation_history) - 1)
                 observation_batch[-1].append(game_history.get_stacked_observations(
                     cpos, self.config.stacked_observations
                 ))
+                # if cpos != i:
+                #     observation_batch[-1][-1] *= 0.0
 
             action_batch.append(actions)
             value_batch.append(values)
@@ -121,11 +123,15 @@ class ReplayBuffer:
             if self.config.PER:
                 weight_batch.append((1 / (self.total_samples * game_prob * pos_prob)) ** 1.0)
 
+
         if False and self.config.PER:
             weight_batch = numpy.array(weight_batch, dtype="float32") / max(
                 weight_batch
             )
 
+        print("Get batch convert")
+        observation_batch = numpy.array(observation_batch, dtype=numpy.float32)
+        print("Done get batch")
         # observation_batch: batch, channels, height, width
         # action_batch: batch, num_unroll_steps+1
         # value_batch: batch, num_unroll_steps+1
@@ -264,7 +270,8 @@ class ReplayBuffer:
 
             if current_index < len(game_history.root_values):
                 sum_rewards += game_history.reward_history[current_index]
-                target_values.append(value + sum_rewards)
+                target_values.append(value)
+                # target_values.append(value + sum_rewards)
                 # target_rewards.append(sum_rewards)
                 target_rewards.append(game_history.reward_history[current_index])
                 target_policies.append(game_history.child_visits[current_index])

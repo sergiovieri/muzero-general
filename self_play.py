@@ -142,7 +142,7 @@ class SelfPlay:
         prev_action = 0
         repeat_left = 0
         repeat_chance = 0.1
-        repeat_amount = 7
+        repeat_amount = 3
 
         with torch.no_grad():
             while (
@@ -584,32 +584,45 @@ class GameHistory:
         # Convert to positive index
         index = index % len(self.observation_history)
 
-        stacked_observations = self.observation_history[index].astype(numpy.float32) / 255
+        #stacked_observations = self.observation_history[index].astype(numpy.float32) / 255
+        stacked_observations = numpy.zeros((num_stacked_observations * 2 + 1, *self.observation_history[index].shape),
+                                           dtype=numpy.float32)
+        stacked_observations[0] = self.observation_history[index] / 255.0
+        stacked_index = 1
         for past_observation_index in reversed(
             range(index - num_stacked_observations, index)
         ):
             if 0 <= past_observation_index:
-                previous_observation = numpy.concatenate(
-                    (
-                        self.observation_history[past_observation_index] / 255,
-                        [
-                            numpy.ones_like(stacked_observations[0])
-                            * self.action_history[past_observation_index + 1]
-                        ],
-                    )
-                )
+                obs = self.observation_history[past_observation_index] / 255.0
+                act = numpy.ones_like(stacked_observations[0], dtype=numpy.float32) * self.action_history[past_observation_index + 1]
+                #previous_observation = numpy.concatenate(
+                #    (
+                #        self.observation_history[past_observation_index] / 255.0,
+                #        [
+                #            numpy.ones_like(stacked_observations[0])
+                #            * self.action_history[past_observation_index + 1]
+                #        ],
+                #    )
+                #)
             else:
-                previous_observation = numpy.concatenate(
-                    (
-                        numpy.zeros_like(self.observation_history[index]),
-                        [numpy.zeros_like(stacked_observations[0])],
-                    )
-                )
+                obs = numpy.zeros_like(self.observation_history[index], dtype=numpy.float32)
+                act = numpy.zeros_like(stacked_observations[0], dtype=numpy.float32)
+                # previous_observation = numpy.concatenate(
+                #     (
+                #         numpy.zeros_like(self.observation_history[index]),
+                #         [numpy.zeros_like(stacked_observations[0])],
+                #     )
+                # )
 
-            stacked_observations = numpy.concatenate(
-                (stacked_observations, previous_observation)
-            )
+            stacked_observations[stacked_index] = obs
+            stacked_observations[stacked_index + 1] = act
+            stacked_index += 2
+            # stacked_observations = numpy.concatenate(
+            #     (stacked_observations, previous_observation)
+            # )
 
+        assert stacked_index == len(stacked_observations)
+        stacked_observations = numpy.concatenate(stacked_observations)
         return stacked_observations
 
 
@@ -626,7 +639,7 @@ class MinMaxStats:
     def update(self, value):
         self.maximum = max(self.maximum, value)
         self.minimum = min(self.minimum, value)
-        self.minimum = min(self.minimum, self.maximum * 0.99 - 1e-3)
+        self.minimum = min(self.minimum, self.maximum * 0.9 - 1e-3)
 
     def normalize(self, value):
         if self.maximum > self.minimum:

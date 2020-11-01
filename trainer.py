@@ -84,6 +84,8 @@ class Trainer:
                 value_loss,
                 reward_loss,
                 policy_loss,
+                grad_norm,
+                l2_norm,
             ) = self.update_weights(batch)
             print('Weights updated')
 
@@ -111,6 +113,8 @@ class Trainer:
                     "value_loss": value_loss,
                     "reward_loss": reward_loss,
                     "policy_loss": policy_loss,
+                    "grad_norm": grad_norm,
+                    "l2_norm": l2_norm,
                 }
             )
 
@@ -153,8 +157,10 @@ class Trainer:
         device = next(self.model.parameters()).device
         if self.config.PER:
             weight_batch = torch.tensor(weight_batch.copy()).float().to(device)
-        observation_numpy = numpy.array(observation_batch, dtype=numpy.float32)
-        observation_batch = torch.tensor(observation_numpy).float().to(device)
+        # observation_numpy = numpy.array(observation_batch, dtype=numpy.float32)
+        # observation_batch = torch.tensor(observation_numpy).float().to(device)
+        observation_batch = torch.from_numpy(observation_batch).to(device)
+        # observation_batch = torch.tensor(observation_batch).float().to(device)
         action_batch = torch.tensor(action_batch).long().to(device).unsqueeze(-1)
         target_value = torch.tensor(target_value).float().to(device)
         target_reward = torch.tensor(target_reward).float().to(device)
@@ -168,7 +174,7 @@ class Trainer:
         # gradient_scale_batch: batch, num_unroll_steps+1
 
         print(f'Ori {target_policy[:4].detach().cpu().numpy()}')
-        if self.training_step < 1000:
+        if self.training_step < 100000:
             target_policy = torch.full_like(target_policy, 1 / len(self.config.action_space)).float().to(device)
 
 
@@ -189,7 +195,7 @@ class Trainer:
         )
         predictions = [(value, reward, policy_logits)]
         batch_size = observation_batch.shape[0]
-        ori_hidden_state = hidden_state
+        ori_hidden_state = hidden_state.detach()
         next_loss = 0
         debug_hist = []
         for i in range(1, action_batch.shape[1]):
@@ -214,14 +220,28 @@ class Trainer:
                 print(f'!Target value {models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item()}')
                 print(f'!Value {models.support_to_scalar(value[0:1], self.config.support_size).item()}')
                 print(f'!Reward {models.support_to_scalar(reward[0:1], self.config.support_size).item()}')
-            # next_value, _, next_policy_logits, target_state = self.model.initial_inference(observation_batch[:, i])#[3].detach()
-            # current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
-            # if i == 1:
-            #     next_loss = current_loss
-            # elif i < observation_batch.shape[1]:
-            #     next_loss += current_loss
-            # print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
-            #         torch.nn.MSELoss()(target_state, ori_hidden_state).item())
+            with torch.no_grad():
+                target_state = self.model.representation(observation_batch[:, i])
+            #     next_value, next_reward, next_policy_logits, target_state = self.model.initial_inference(observation_batch[:, i])
+            # next_value.detach_()
+            # next_reward.detach_()
+            # next_policy_logits.detach_()
+            target_state.detach_()
+
+            # target_state = self.model.representation(observation_batch[:, i])
+
+            current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
+            if i == 1:
+                next_loss = current_loss
+            elif i < observation_batch.shape[1]:
+                next_loss += current_loss
+            else:
+                print(f"Warning OOB {i} {observation_batch.shape[1]}")
+                assert False
+            print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
+                    torch.nn.MSELoss()(target_state, ori_hidden_state).item())
+            print(f"mn {current_loss.view(len(current_loss), -1).mean(1).min()} mx {current_loss.view(len(current_loss), -1).mean(1).max()}")
+            print(f"0-1: {torch.nn.MSELoss()(hidden_state[0], hidden_state[1]).item()}")
             # Scale the gradient at the start of the dynamics function (See paper appendix Training)
             hidden_state.register_hook(lambda grad: grad * 0.5)
             predictions.append((value, reward, policy_logits))#, next_value, next_policy_logits))
@@ -301,7 +321,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss# + 0.01 * next_loss
+        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss# + 1 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
@@ -312,8 +332,23 @@ class Trainer:
         # Optimize
         self.optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)
         self.optimizer.step()
         self.training_step += 1
+
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                print(n)
+
+        grad_norm = 0.
+        l2_norm = 0.
+        for p in self.model.parameters():
+            param_norm = p.grad.data.norm(2)
+            grad_norm += param_norm.item() ** 2
+            l2_norm += torch.norm(p).item()
+
+        grad_norm = grad_norm ** (1. / 2)
+        l2_norm *= self.config.weight_decay
 
         # for name, param in self.model.named_parameters():
         #     print(name, param.grad.abs().mean().item(), param.data.abs().mean().item())
@@ -325,6 +360,8 @@ class Trainer:
             value_loss.mean().item(),
             reward_loss.mean().item(),
             policy_loss.mean().item(),
+            grad_norm,
+            l2_norm,
         )
 
     def update_lr(self):
