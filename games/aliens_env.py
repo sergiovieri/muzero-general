@@ -150,8 +150,8 @@ class MuZeroConfig:
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
         # Root prior exploration noise
-        self.root_dirichlet_alpha = 0.25
-        self.root_exploration_fraction = 0.25
+        self.root_dirichlet_alpha = 0.75
+        self.root_exploration_fraction = 0.75
 
         # UCB formula
         self.pb_c_base = 19652
@@ -165,14 +165,14 @@ class MuZeroConfig:
 
         # Residual Network
         self.downsample = "resnet"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
-        self.blocks = 8  # Number of blocks in the ResNet
-        self.channels = 128  # Number of channels in the ResNet
-        self.reduced_channels_reward = 32  # Number of channels in reward head
-        self.reduced_channels_value = 32  # Number of channels in value head
-        self.reduced_channels_policy = 32  # Number of channels in policy head
-        self.resnet_fc_reward_layers = [128]  # Define the hidden layers in the reward head of the dynamic network
-        self.resnet_fc_value_layers = [128]  # Define the hidden layers in the value head of the prediction network
-        self.resnet_fc_policy_layers = [128]  # Define the hidden layers in the policy head of the prediction network
+        self.blocks = 4  # Number of blocks in the ResNet
+        self.channels = 64  # Number of channels in the ResNet
+        self.reduced_channels_reward = 16  # Number of channels in reward head
+        self.reduced_channels_value = 16  # Number of channels in value head
+        self.reduced_channels_policy = 16  # Number of channels in policy head
+        self.resnet_fc_reward_layers = [64]  # Define the hidden layers in the reward head of the dynamic network
+        self.resnet_fc_value_layers = [64]  # Define the hidden layers in the value head of the prediction network
+        self.resnet_fc_policy_layers = [64]  # Define the hidden layers in the policy head of the prediction network
 
         # Fully Connected Network
         self.encoding_size = 16
@@ -232,8 +232,8 @@ class MuZeroConfig:
         Returns:
             Positive float.
         """
-        if trained_steps < 1000000:
-            return 1.0
+        if trained_steps < 100:
+            return 100.0
         if trained_steps < 500e3:
             return 1.0
         elif trained_steps < 750e3:

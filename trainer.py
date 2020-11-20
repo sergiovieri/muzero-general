@@ -174,15 +174,15 @@ class Trainer:
         # gradient_scale_batch: batch, num_unroll_steps+1
 
         print(f'Ori {target_policy[:4].detach().cpu().numpy()}')
-        if self.training_step < 100000:
+        if self.training_step < 1000:
             target_policy = torch.full_like(target_policy, 1 / len(self.config.action_space)).float().to(device)
 
 
         target_value = models.scalar_to_support(target_value, self.config.support_size)
         mau = None
-        for i in range(target_reward.shape[0]):
-            if target_reward[i][1:].sum() > 0.5:
-                mau = i
+        # for i in range(target_reward.shape[0]):
+        #     if target_reward[i][1:].sum() > 0.5:
+        #         mau = i
         target_reward = models.scalar_to_support(
             target_reward, self.config.support_size
         )
@@ -220,28 +220,22 @@ class Trainer:
                 print(f'!Target value {models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item()}')
                 print(f'!Value {models.support_to_scalar(value[0:1], self.config.support_size).item()}')
                 print(f'!Reward {models.support_to_scalar(reward[0:1], self.config.support_size).item()}')
-            with torch.no_grad():
-                target_state = self.model.representation(observation_batch[:, i])
-            #     next_value, next_reward, next_policy_logits, target_state = self.model.initial_inference(observation_batch[:, i])
-            # next_value.detach_()
-            # next_reward.detach_()
-            # next_policy_logits.detach_()
-            target_state.detach_()
+            # with torch.no_grad():
+            #     target_state = self.model.representation(observation_batch[:, i])
+            # target_state.detach_()
 
-            # target_state = self.model.representation(observation_batch[:, i])
-
-            current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
-            if i == 1:
-                next_loss = current_loss
-            elif i < observation_batch.shape[1]:
-                next_loss += current_loss
-            else:
-                print(f"Warning OOB {i} {observation_batch.shape[1]}")
-                assert False
-            print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
-                    torch.nn.MSELoss()(target_state, ori_hidden_state).item())
-            print(f"mn {current_loss.view(len(current_loss), -1).mean(1).min()} mx {current_loss.view(len(current_loss), -1).mean(1).max()}")
-            print(f"0-1: {torch.nn.MSELoss()(hidden_state[0], hidden_state[1]).item()}")
+            # current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
+            # if i == 1:
+            #     next_loss = current_loss
+            # elif i < observation_batch.shape[1]:
+            #     next_loss += current_loss
+            # else:
+            #     print(f"Warning OOB {i} {observation_batch.shape[1]}")
+            #     assert False
+            # print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
+            #         torch.nn.MSELoss()(target_state, ori_hidden_state).item())
+            # print(f"mn {current_loss.view(len(current_loss), -1).mean(1).min()} mx {current_loss.view(len(current_loss), -1).mean(1).max()}")
+            # print(f"0-1: {torch.nn.MSELoss()(hidden_state[0], hidden_state[1]).item()}")
             # Scale the gradient at the start of the dynamics function (See paper appendix Training)
             hidden_state.register_hook(lambda grad: grad * 0.5)
             predictions.append((value, reward, policy_logits))#, next_value, next_policy_logits))
@@ -336,9 +330,9 @@ class Trainer:
         self.optimizer.step()
         self.training_step += 1
 
-        for n, p in self.model.named_parameters():
-            if p.grad is None:
-                print(n)
+        # for n, p in self.model.named_parameters():
+        #     if p.grad is None:
+        #         print(n)
 
         grad_norm = 0.
         l2_norm = 0.

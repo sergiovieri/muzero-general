@@ -49,27 +49,29 @@ class SelfPlay:
                 )
 
                 # Save to the shared storage
-                shared_storage.set_info.remote(
-                    {
-                        "episode_length": len(game_history.action_history) - 1,
-                        "total_reward": sum(game_history.reward_history),
-                        "mean_value": numpy.mean(
-                            [value for value in game_history.root_values if value]
-                        ),
-                    }
-                )
+                # shared_storage.set_info.remote(
+                #     {
+                #         "episode_length": len(game_history.action_history) - 1,
+                #         "total_reward": sum(game_history.reward_history),
+                #         "mean_value": numpy.mean(
+                #             [value for value in game_history.root_values if value]
+                #         ),
+                #     }
+                # )
 
                 replay_buffer.save_game.remote(game_history, shared_storage)
 
             else:
+                time.sleep(60)
                 print('PLAY TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
                 # Take the best action (no exploration) in test mode
                 game_history = self.play_game(
-                    0.25,
+                    0,
                     self.config.temperature_threshold,
                     False,
                     "self" if len(self.config.players) == 1 else self.config.opponent,
                     self.config.muzero_player,
+                    test_mode=True,
                 )
 
                 print('Played test', sum(game_history.reward_history))
@@ -121,14 +123,15 @@ class SelfPlay:
         self.close_game()
 
     def play_game(
-        self, temperature, temperature_threshold, render, opponent, muzero_player
+        self, temperature, temperature_threshold, render, opponent, muzero_player, test_mode=False,
     ):
         """
         Play one game with actions based on the Monte Carlo tree search at each moves.
         """
         game_history = GameHistory()
         observation = self.game.reset()
-        # self.game.training = False
+        if test_mode:
+            self.game.training = False
         game_history.action_history.append(0)
         game_history.observation_history.append(observation)
         game_history.reward_history.append(0)
@@ -141,8 +144,8 @@ class SelfPlay:
 
         prev_action = 0
         repeat_left = 0
-        repeat_chance = 0.1
-        repeat_amount = 3
+        repeat_chance = 0.0 if test_mode else 0.1
+        repeat_amount = 4
 
         with torch.no_grad():
             while (
@@ -384,7 +387,7 @@ class MCTS:
 
             while node.expanded():
                 current_tree_depth += 1
-                action, node = self.select_child(node, min_max_stats)
+                action, node = self.select_child(node, min_max_stats, current_tree_depth == 1)
                 search_path.append(node)
 
                 # Players play turn by turn
@@ -425,24 +428,24 @@ class MCTS:
         # print(f'Policy {policy}')
         return root, extra_info
 
-    def select_child(self, node, min_max_stats):
+    def select_child(self, node, min_max_stats, is_root):
         """
         Select the child with the highest UCB score.
         """
         max_ucb = max(
-            self.ucb_score(node, child, min_max_stats)
+            self.ucb_score(node, child, min_max_stats, is_root)
             for action, child in node.children.items()
         )
         action = numpy.random.choice(
             [
                 action
                 for action, child in node.children.items()
-                if self.ucb_score(node, child, min_max_stats) == max_ucb
+                if self.ucb_score(node, child, min_max_stats, is_root) == max_ucb
             ]
         )
         return action, node.children[action]
 
-    def ucb_score(self, parent, child, min_max_stats):
+    def ucb_score(self, parent, child, min_max_stats, is_root):
         """
         The score for a node is based on its value, plus an exploration bonus based on the prior.
         """
@@ -464,7 +467,7 @@ class MCTS:
                 * (child.value() if len(self.config.players) == 1 else -child.value())
             )
         else:
-            value_score = 1
+            value_score = 1 if is_root else 0
 
         return prior_score + value_score
 

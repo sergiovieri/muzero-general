@@ -57,10 +57,6 @@ class ReplayBuffer:
         self.num_played_steps += len(game_history.root_values)
         self.total_samples += len(game_history.root_values)
 
-        print('SIZE BUFF', sys.getsizeof(self.buffer))
-        print('SIZE ALL', sys.getsizeof(self))
-        print('LEN', len(self.buffer))
-
         if self.config.replay_buffer_size < len(self.buffer):
             del_id = self.num_played_games - len(self.buffer)
             self.total_samples -= len(self.buffer[del_id].root_values)
@@ -99,7 +95,7 @@ class ReplayBuffer:
 
             for i in range(game_pos, game_pos + self.config.num_unroll_steps + 1):
                 # if i >= len(game_history.observation_history): break
-                # if i > game_pos: break
+                if i > game_pos: break
                 cpos = min(i, len(game_history.observation_history) - 1)
                 observation_batch[-1].append(game_history.get_stacked_observations(
                     cpos, self.config.stacked_observations
@@ -182,9 +178,10 @@ class ReplayBuffer:
             position_probs = game_history.priorities / sum(game_history.priorities)
             position_index = numpy.random.choice(len(position_probs), p=position_probs)
             position_prob = position_probs[position_index]
+            position_index -= numpy.random.randint(0, 2)
             # position_index -= numpy.random.randint(0, self.config.num_unroll_steps)
-            # if position_index < 0:
-            #     position_index = 0
+            if position_index < 0:
+                position_index = 0
 
         else:
             position_index = numpy.random.choice(len(game_history.root_values))
