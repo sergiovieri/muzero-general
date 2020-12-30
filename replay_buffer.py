@@ -95,7 +95,7 @@ class ReplayBuffer:
 
             for i in range(game_pos, game_pos + self.config.num_unroll_steps + 1):
                 # if i >= len(game_history.observation_history): break
-                if i > game_pos: break
+                # if i > game_pos: break
                 cpos = min(i, len(game_history.observation_history) - 1)
                 observation_batch[-1].append(game_history.get_stacked_observations(
                     cpos, self.config.stacked_observations
@@ -125,9 +125,9 @@ class ReplayBuffer:
                 weight_batch
             )
 
-        print("Get batch convert")
+        # print("Get batch convert")
         observation_batch = numpy.array(observation_batch, dtype=numpy.float32)
-        print("Done get batch")
+        # print("Done get batch")
         # observation_batch: batch, channels, height, width
         # action_batch: batch, num_unroll_steps+1
         # value_batch: batch, num_unroll_steps+1
@@ -221,10 +221,12 @@ class ReplayBuffer:
                     self.buffer[game_id].priorities
                 )
 
-    def compute_target_value(self, game_history, index):
+    def compute_target_value(self, game_history, index, td_steps=None):
         # The value target is the discounted root value of the search tree td_steps into the
         # future, plus the discounted sum of all rewards until then.
-        bootstrap_index = index + self.config.td_steps
+        if td_steps is None:
+            td_steps = self.config.td_steps
+        bootstrap_index = index + td_steps
         if bootstrap_index < len(game_history.root_values):
             root_values = (
                 game_history.root_values
@@ -238,7 +240,7 @@ class ReplayBuffer:
                 else -root_values[bootstrap_index]
             )
 
-            value = last_step_value * self.config.discount ** self.config.td_steps
+            value = last_step_value * self.config.discount ** td_steps
         else:
             value = 0
 
@@ -263,7 +265,7 @@ class ReplayBuffer:
         for current_index in range(
             state_index, state_index + self.config.num_unroll_steps + 1
         ):
-            value = self.compute_target_value(game_history, current_index)
+            value = self.compute_target_value(game_history, current_index, None if state_index == current_index else None)
 
             if current_index < len(game_history.root_values):
                 sum_rewards += game_history.reward_history[current_index]
@@ -368,19 +370,28 @@ class Reanalyse:
 
             if self.config.use_last_model_value:
                 new_values = []
-                for i in range(len(game_history.root_values)):
-                    observation = [game_history.get_stacked_observations(
-                        i, self.config.stacked_observations
-                    )]
-                    observation = torch.tensor(observation).float().to(next(self.model.parameters()).device)
-                    value = models.support_to_scalar(
-                        self.model.initial_inference(observation)[0],
-                        self.config.support_size,
-                    ).item()
-                    new_values.append(value)
+                batch_size = 256
+                for i in range(0, len(game_history.root_values), batch_size):
+                    limit = min(len(game_history.root_values), i + batch_size)
+                    observations = [
+                        game_history.get_stacked_observations(
+                            j, self.config.stacked_observations
+                        )
+                        for j in range(i, limit)
+                    ]
+                    observations = torch.tensor(observations).float().to(next(self.model.parameters()).device)
+                    with torch.no_grad():
+                        values = models.support_to_scalar(
+                            self.model.initial_inference(observations)[0],
+                            self.config.support_size,
+                        ).detach().cpu().numpy()
+                    new_values.append(values)
+
+                new_values = numpy.concatenate(new_values).squeeze()
+                assert len(new_values) == len(game_history.root_values)
 
                 game_history.reanalysed_predicted_root_values = (
-                    numpy.array(new_values)
+                    new_values
                 )
 
             replay_buffer.update_game_history.remote(game_id, game_history)

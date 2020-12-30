@@ -232,7 +232,7 @@ def conv2d_init(m):
     n = m.kernel_size[0] * m.kernel_size[1] * m.in_channels
     m.weight.data.normal_(0, math.sqrt(2. / n))
 
-G = 16
+G = 8
 
 # Residual block
 class ResidualBlock(torch.nn.Module):
@@ -288,9 +288,21 @@ class ResidualBlock2(torch.nn.Module):
         x = torch.nn.functional.relu(x)
         return x
 
+    def forward2(self, x):
+        inp = x
+        x = self.bn1(x)
+        x = torch.nn.functional.relu(x)
+        x = self.conv1(x)
+        x = self.bn2(x)
+        x = torch.nn.functional.relu(x)
+        x = self.conv2(x)
+        x += inp[:, :x.shape[1]]
+        return x
+
+
 # Convolution block
 class ConvolutionBlock(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, relu=True, zero_init=False):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, zero_init=False):
         super().__init__()
         self.conv = torch.nn.Conv2d(
             in_channels,
@@ -300,16 +312,14 @@ class ConvolutionBlock(torch.nn.Module):
             padding=padding,
             bias=False,
         )
-        self.bn = torch.nn.GroupNorm(G, out_channels)
-        self.relu = relu
+        self.bn = torch.nn.GroupNorm(G if out_channels >= G * 2 else out_channels // 2, out_channels)
         if zero_init:
             self.bn.weight.data.fill_(0)
 
     def forward(self, x):
         x = self.conv(x)
         x = self.bn(x)
-        if self.relu:
-            x = torch.nn.functional.relu(x)
+        x = torch.nn.functional.relu(x)
         return x
 
 # Downsample observations before representation network (See paper appendix Network Architecture)
@@ -319,7 +329,7 @@ class DownSample(torch.nn.Module):
         self.conv1 = ConvolutionBlock(
             in_channels,
             out_channels // 2,
-            stride=2
+            stride=2,
         )
         self.resblocks1 = torch.nn.ModuleList(
             [ResidualBlock(out_channels // 2) for _ in range(2)]
@@ -404,14 +414,11 @@ class RepresentationNetwork(torch.nn.Module):
                 )
             else:
                 raise NotImplementedError('downsample should be "resnet" or "CNN".')
-        # self.conv = conv3x3(
-        #     observation_shape[0] * (stacked_observations + 1) + stacked_observations,
-        #     num_channels,
-        # )
+
         self.resblocks = torch.nn.ModuleList(
             [ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
-        # self.hidden_state_conv = ConvolutionBlock(num_channels, num_channels, relu=False)
+        self.bn_state = torch.nn.GroupNorm(G, num_channels)
 
     def forward(self, x):
         if self.downsample:
@@ -422,7 +429,7 @@ class RepresentationNetwork(torch.nn.Module):
 
         for block in self.resblocks:
             x = block(x)
-        # x = self.hidden_state_conv(x)
+        x = self.bn_state(x)
         return x
 
 
@@ -449,17 +456,20 @@ class DynamicsNetwork(torch.nn.Module):
         # self.bn2 = torch.nn.GroupNorm(G, num_channels)
         # self.bn2.weight.data.fill_(0)
         self.resblocks = torch.nn.ModuleList(
-            [ResidualBlock2(num_channels + action_space_size, num_channels, identity_init=True) for _ in range(num_blocks)]
+            [ResidualBlock2(num_channels + action_space_size, num_channels, identity_init=False) for _ in range(num_blocks)]
         )
         # self.hidden_state_conv = ConvolutionBlock(num_channels, num_channels, relu=False, zero_init=True)
 
+        self.bn_state = torch.nn.GroupNorm(G, num_channels)
         # self.bn_reward = torch.nn.GroupNorm(G, num_channels)
-        # self.conv1x1_reward = torch.nn.Conv2d(num_channels, reduced_channels_reward, 1)
-        self.conv1x1_reward = ConvolutionBlock(num_channels, reduced_channels_reward, kernel_size=1, padding=0)
+        self.conv1x1_reward = torch.nn.Conv2d(num_channels, reduced_channels_reward, 1)
+        self.avg_reward = torch.nn.AdaptiveAvgPool2d(1)
+        # self.conv1x1_reward = ConvolutionBlock(num_channels, reduced_channels_reward, kernel_size=1, padding=0)
         self.block_output_size_reward = block_output_size_reward
-        self.fc = mlp(
-            self.block_output_size_reward, fc_reward_layers, full_support_size#, zero_last=True
-        )
+        self.fc = mlp(reduced_channels_reward, fc_reward_layers, full_support_size)
+        # self.fc = mlp(
+        #     self.block_output_size_reward, fc_reward_layers, full_support_size#, zero_last=True
+        # )
 
     def forward(self, x):
         act = x[:, self.num_channels:]
@@ -475,14 +485,17 @@ class DynamicsNetwork(torch.nn.Module):
         # x = torch.nn.functional.relu(x)
         for block in self.resblocks:
             x = block(torch.cat((x, act), 1))
+        x = self.bn_state(x)
         # x = self.hidden_state_conv(x)
         # x += inp[:,:x.shape[1]]
         # x = x[:, :self.num_channels]
         state = x
         # x = self.bn_reward(x)
         x = self.conv1x1_reward(x)
-        # x = torch.nn.functional.relu(x)
-        x = x.view(-1, self.block_output_size_reward)
+        x = torch.nn.functional.relu(x)
+        x = self.avg_reward(x)
+        x = torch.flatten(x, start_dim=1)
+        # x = x.view(-1, self.block_output_size_reward)
         reward = self.fc(x)
         return state, reward
 
@@ -502,26 +515,34 @@ class PredictionNetwork(torch.nn.Module):
         block_output_size_policy,
     ):
         super().__init__()
-        # self.conv1x1_value = torch.nn.Conv2d(num_channels, reduced_channels_value, 1)
-        self.conv1x1_value = ConvolutionBlock(num_channels, reduced_channels_value, kernel_size=1, padding=0)
-        # self.conv1x1_policy = torch.nn.Conv2d(num_channels, reduced_channels_policy, 1)
-        self.conv1x1_policy = ConvolutionBlock(num_channels, reduced_channels_policy, kernel_size=1, padding=0)
+        self.conv1x1_value = torch.nn.Conv2d(num_channels, reduced_channels_value, 1)
+        self.avg_value = torch.nn.AdaptiveAvgPool2d(1)
+        # self.conv1x1_value = ConvolutionBlock(num_channels, reduced_channels_value, kernel_size=1, padding=0)
+        self.conv1x1_policy = torch.nn.Conv2d(num_channels, reduced_channels_policy, 1)
+        self.avg_policy = torch.nn.AdaptiveAvgPool2d(1)
+        # self.conv1x1_policy = ConvolutionBlock(num_channels, reduced_channels_policy, kernel_size=1, padding=0)
         self.block_output_size_value = block_output_size_value
         self.block_output_size_policy = block_output_size_policy
-        self.fc_value = mlp(
-            self.block_output_size_value, fc_value_layers, full_support_size#, zero_last=True
-        )
-        self.fc_policy = mlp(
-            self.block_output_size_policy, fc_policy_layers, action_space_size,
-        )
+        self.fc_value = mlp(reduced_channels_value, fc_value_layers, full_support_size)
+        self.fc_policy = mlp(reduced_channels_policy, fc_policy_layers, action_space_size)
+        # self.fc_value = mlp(
+        #     self.block_output_size_value, fc_value_layers, full_support_size#, zero_last=True
+        # )
+        # self.fc_policy = mlp(
+        #     self.block_output_size_policy, fc_policy_layers, action_space_size,
+        # )
 
     def forward(self, x):
         value = self.conv1x1_value(x)
-        # value = torch.nn.functional.relu(value)
+        value = torch.nn.functional.relu(value)
+        value = self.avg_value(value)
         policy = self.conv1x1_policy(x)
-        # policy = torch.nn.functional.relu(policy)
-        value = value.view(-1, self.block_output_size_value)
-        policy = policy.view(-1, self.block_output_size_policy)
+        policy = torch.nn.functional.relu(policy)
+        policy = self.avg_policy(policy)
+        value = torch.flatten(value, start_dim=1)
+        policy = torch.flatten(value, start_dim=1)
+        # value = value.view(-1, self.block_output_size_value)
+        # policy = policy.view(-1, self.block_output_size_policy)
         value = self.fc_value(value)
         policy = self.fc_policy(policy)
         return policy, value
@@ -616,9 +637,9 @@ class MuZeroResidualNetwork(AbstractNetwork):
 
         # self.hidden_state_bn = torch.nn.GroupNorm(G, num_channels)
 
-        for m in self.modules():
-            if isinstance(m, torch.nn.Conv2d):
-                conv2d_init(m)
+        # for m in self.modules():
+        #     if isinstance(m, torch.nn.Conv2d):
+        #         conv2d_init(m)
 
     def prediction(self, encoded_state):
         policy, value = self.prediction_network(encoded_state)
@@ -627,7 +648,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
     def representation(self, observation):
         encoded_state = self.representation_network(observation)
         # encoded_state = self.hidden_state_bn(encoded_state)
-        # return encoded_state
+        return encoded_state
 
         # Scale encoded state between [0, 1] (See appendix paper Training)
         min_encoded_state = (
@@ -670,7 +691,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
         x = torch.cat((encoded_state, action_one_hot), dim=1)
         next_encoded_state, reward = self.dynamics_network(x)
         # next_encoded_state = self.hidden_state_bn(next_encoded_state)
-        # return next_encoded_state, reward
+        return next_encoded_state, reward
 
         # Scale encoded state between [0, 1] (See paper appendix Training)
         min_next_encoded_state = (

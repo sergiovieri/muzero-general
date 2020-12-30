@@ -43,6 +43,7 @@ class Trainer:
                 self.add_weight_decay(self.model, self.config.weight_decay),
                 lr=self.config.lr_init,
                 momentum=self.config.momentum,
+                nesterov=True,
             )
         elif self.config.optimizer == "Adam":
             self.optimizer = torch.optim.Adam(
@@ -72,9 +73,9 @@ class Trainer:
         while self.training_step < self.config.training_steps and not ray.get(
             shared_storage.get_info.remote("terminate")
         ):
-            print('Start train loop')
+            # print('Start train loop')
             index_batch, batch = ray.get(pipelined_batch)
-            print('Got batch')
+            # print('Got batch')
             pipelined_batch = replay_buffer.get_batch.remote()
             # print(f'Index {index_batch}')
             self.update_lr()
@@ -87,7 +88,7 @@ class Trainer:
                 grad_norm,
                 l2_norm,
             ) = self.update_weights(batch)
-            print('Weights updated')
+            # print('Weights updated')
 
             if self.config.PER:
                 # Save new priorities in the replay buffer (See https://arxiv.org/abs/1803.00933)
@@ -121,13 +122,13 @@ class Trainer:
             # Managing the self-play / training ratio
             if self.config.training_delay:
                 time.sleep(self.config.training_delay)
-            if self.config.ratio:
+            if self.config.ratio_max:
                 while (
                     self.training_step
                     / max(
                         1, ray.get(shared_storage.get_info.remote("num_played_steps"))
                     )
-                    > self.config.ratio * 1.1
+                    > self.config.ratio_max
                     and self.training_step < self.config.training_steps
                     and not ray.get(shared_storage.get_info.remote("terminate"))
                 ):
@@ -148,8 +149,8 @@ class Trainer:
             gradient_scale_batch,
         ) = batch
 
-        print('Update weights')
-        print(f'Weight {weight_batch[:8]}')
+        # print('Update weights')
+        # print(f'Weight {weight_batch[:8]}')
         # Keep values as scalars for calculating the priorities for the prioritized replay
         target_value_scalar = numpy.array(target_value, dtype="float32")
         priorities = numpy.zeros_like(target_value_scalar)
@@ -175,11 +176,12 @@ class Trainer:
 
         print(f'Ori {target_policy[:4].detach().cpu().numpy()}')
         if self.training_step < 1000:
+            # target_value *= 0.0
             target_policy = torch.full_like(target_policy, 1 / len(self.config.action_space)).float().to(device)
 
 
         target_value = models.scalar_to_support(target_value, self.config.support_size)
-        mau = None
+        mau = 0
         # for i in range(target_reward.shape[0]):
         #     if target_reward[i][1:].sum() > 0.5:
         #         mau = i
@@ -197,9 +199,12 @@ class Trainer:
         batch_size = observation_batch.shape[0]
         ori_hidden_state = hidden_state.detach()
         next_loss = 0
-        debug_hist = []
+        debug_hist = [(
+            models.support_to_scalar(torch.log(target_value[0:1, 0]), self.config.support_size).item(),
+            models.support_to_scalar(value[0:1], self.config.support_size).item(),
+        )]
         for i in range(1, action_batch.shape[1]):
-            print(f'>>>unroll {i}')
+            # print(f'>>>unroll {i}')
             value, reward, policy_logits, hidden_state = self.model.recurrent_inference(
                 hidden_state, action_batch[:, i]
             )
@@ -210,19 +215,39 @@ class Trainer:
                 rr = models.support_to_scalar(reward[mau:mau+1], self.config.support_size).item()
                 tp = target_policy[mau, i]
                 debug_hist.append((tv, rv, tr, rr))
-                print(f'Weight {weight_batch[mau].item()}')
-                print(f'Target value {tv:.6f}')
-                print(f'Value {rv:.6f}')
-                print(f'Target reward {tr:.6f}')
-                print(f'Reward {rr:.6f}')
-                print(f'Target policy {tp}')
-                print('!At 0')
-                print(f'!Target value {models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item()}')
-                print(f'!Value {models.support_to_scalar(value[0:1], self.config.support_size).item()}')
-                print(f'!Reward {models.support_to_scalar(reward[0:1], self.config.support_size).item()}')
+                print('Value', torch.softmax(value[mau], dim=0)[100:110].detach().cpu().numpy())
+                # print(f'Weight {weight_batch[mau].item()}')
+                # print(f'Target value {tv:.6f}')
+                # print(f'Value {rv:.6f}')
+                # print(f'Target reward {tr:.6f}')
+                # print(f'Reward {rr:.6f}')
+                # print(f'Target policy {tp}')
+                # print('!At 0')
+                # print(f'!Target value {models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item()}')
+                # print(f'!Value {models.support_to_scalar(value[0:1], self.config.support_size).item()}')
+                # print(f'!Reward {models.support_to_scalar(reward[0:1], self.config.support_size).item()}')
             # with torch.no_grad():
             #     target_state = self.model.representation(observation_batch[:, i])
             # target_state.detach_()
+
+            # target_state = self.model.representation(observation_batch[:, i])
+
+            with torch.no_grad():
+                current_value, _, current_policy, _ = self.model.initial_inference(observation_batch[:, i])
+
+            print('Replace',
+                    models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item(),
+                    'with',
+                    models.support_to_scalar(torch.log(torch.softmax(current_value[0:1], dim=1)), self.config.support_size).item()
+            )
+            print('Replace policy',
+                    target_policy[0:1, i].detach().cpu().numpy(),
+                    'with',
+                    torch.softmax(current_policy[0:1], dim=1).detach().cpu().numpy(),
+            )
+            target_value[:, i] = torch.softmax(current_value, dim=1)
+            # if self.training_step >= 1000:
+            target_policy[:, i] = torch.softmax(current_policy, dim=1)
 
             # current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
             # if i == 1:
@@ -241,7 +266,8 @@ class Trainer:
             predictions.append((value, reward, policy_logits))#, next_value, next_policy_logits))
         # predictions: num_unroll_steps+1, 3, batch, 2*support_size+1 | 2*support_size+1 | 9 (according to the 2nd dim)
 
-        if mau is not None: print(f'Debug hist {debug_hist}')
+        if mau is not None:
+            print(f'Debug hist {debug_hist}')
 
         ## Compute losses
         value_loss, reward_loss, policy_loss = (0, 0, 0)
@@ -284,8 +310,8 @@ class Trainer:
                 target_reward[:, i],
                 target_policy[:, i],
             )
-            if mau is not None:
-                print('reward_loss', current_reward_loss[mau].mean().item())
+            # if mau is not None:
+            #     print('reward_loss', current_reward_loss[mau].mean().item())
 
             # Scale gradient by the number of unroll steps (See paper appendix Training)
             current_value_loss.register_hook(
@@ -315,7 +341,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss# + 1 * next_loss
+        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss# + 0.1 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights

@@ -107,13 +107,13 @@ class SelfPlay:
             # Managing the self-play / training ratio
             if not test_mode and self.config.self_play_delay:
                 time.sleep(self.config.self_play_delay)
-            if not test_mode and self.config.ratio:
+            if not test_mode and self.config.ratio_min and ray.get(shared_storage.get_info.remote("num_played_games")) >= 10:
                 while (
                     ray.get(shared_storage.get_info.remote("training_step"))
                     / max(
                         1, ray.get(shared_storage.get_info.remote("num_played_steps"))
                     )
-                    < self.config.ratio
+                    < self.config.ratio_min
                     and ray.get(shared_storage.get_info.remote("training_step"))
                     < self.config.training_steps
                     and not ray.get(shared_storage.get_info.remote("terminate"))
@@ -144,7 +144,7 @@ class SelfPlay:
 
         prev_action = 0
         repeat_left = 0
-        repeat_chance = 0.0 if test_mode else 0.1
+        repeat_chance = 0.0 if test_mode else 0.0
         repeat_amount = 4
 
         with torch.no_grad():
@@ -521,12 +521,14 @@ class Node:
         We expand a node using the value, reward and policy prediction obtained from the
         neural network.
         """
+        reward -= 0.1
         self.to_play = to_play
         self.reward = reward
         self.hidden_state = hidden_state
 
+        policy_softmax_temp = 1.2
         policy_values = torch.softmax(
-            torch.tensor([policy_logits[0][a] for a in actions]), dim=0
+            torch.tensor([policy_logits[0][a] / policy_softmax_temp for a in actions]), dim=0
         ).tolist()
         policy = {a: policy_values[i] for i, a in enumerate(actions)}
         # policy = {a: 1.0 / len(actions) for i, a in enumerate(actions)}
@@ -642,7 +644,7 @@ class MinMaxStats:
     def update(self, value):
         self.maximum = max(self.maximum, value)
         self.minimum = min(self.minimum, value)
-        self.minimum = min(self.minimum, self.maximum * 0.9 - 1e-3)
+        self.minimum = min(self.minimum, self.maximum - 1)
 
     def normalize(self, value):
         if self.maximum > self.minimum:

@@ -179,12 +179,6 @@ class MuZero:
             self.checkpoint, self.replay_buffer, self.config
         )
 
-        if self.config.use_last_model_value:
-            self.reanalyse_worker = replay_buffer.Reanalyse.options(
-                num_cpus=0,
-                num_gpus=num_gpus_per_worker if self.config.reanalyse_on_gpu else 0,
-            ).remote(self.checkpoint, self.config)
-
         self.self_play_workers = [
             self_play.SelfPlay.options(
                 num_cpus=0,
@@ -197,6 +191,12 @@ class MuZero:
             )
             for seed in range(self.config.num_workers)
         ]
+
+        if self.config.use_last_model_value:
+            self.reanalyse_worker = replay_buffer.Reanalyse.options(
+                num_cpus=0,
+                num_gpus=num_gpus_per_worker if self.config.reanalyse_on_gpu else 0,
+            ).remote(self.checkpoint, self.config)
 
         # Launch workers
         [
