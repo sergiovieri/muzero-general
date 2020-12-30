@@ -169,7 +169,7 @@ class SelfPlay:
                         stacked_observations,
                         self.game.legal_actions(),
                         self.game.to_play(),
-                        True,
+                        False if test_mode else True,
                     )
                     action = self.select_action(
                         root,
@@ -467,7 +467,7 @@ class MCTS:
                 * (child.value() if len(self.config.players) == 1 else -child.value())
             )
         else:
-            value_score = 1 if is_root else 0
+            value_score = 0.5 if is_root else 0
 
         return prior_score + value_score
 

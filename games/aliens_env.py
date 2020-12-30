@@ -233,7 +233,7 @@ class MuZeroConfig:
         Returns:
             Positive float.
         """
-        if trained_steps < 1000:
+        if trained_steps < 100:
             return 100.0
         if trained_steps < 500e3:
             return 1.0

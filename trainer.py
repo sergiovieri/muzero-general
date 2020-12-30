@@ -175,7 +175,7 @@ class Trainer:
         # gradient_scale_batch: batch, num_unroll_steps+1
 
         print(f'Ori {target_policy[:4].detach().cpu().numpy()}')
-        if self.training_step < 1000:
+        if self.training_step < 100:
             # target_value *= 0.0
             target_policy = torch.full_like(target_policy, 1 / len(self.config.action_space)).float().to(device)
 
