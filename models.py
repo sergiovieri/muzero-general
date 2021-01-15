@@ -456,7 +456,7 @@ class DynamicsNetwork(torch.nn.Module):
         # self.bn2 = torch.nn.GroupNorm(G, num_channels)
         # self.bn2.weight.data.fill_(0)
         self.resblocks = torch.nn.ModuleList(
-            [ResidualBlock2(num_channels + action_space_size, num_channels, identity_init=False) for _ in range(num_blocks)]
+            [ResidualBlock2(num_channels + action_space_size, num_channels, identity_init=True) for _ in range(num_blocks)]
         )
         # self.hidden_state_conv = ConvolutionBlock(num_channels, num_channels, relu=False, zero_init=True)
 
@@ -825,6 +825,7 @@ class RepresentationJagoCnn(torch.nn.Module):
             torch.nn.Conv2d(in_channels, mid_channels // 2, kernel_size=8, stride=4, padding=0), # 96 -> 23
             torch.nn.ReLU(inplace=True),
             torch.nn.Conv2d(mid_channels // 2, mid_channels, kernel_size=5, stride=2, padding=0), # 23 -> 10
+            torch.nn.ReLU(inplace=True),
             torch.nn.Conv2d(mid_channels, mid_channels, kernel_size=3, stride=1, padding=0), # 10 -> 8
             torch.nn.ReLU(inplace=True),
         )
@@ -867,7 +868,7 @@ class MuZeroJagoNetwork(AbstractNetwork):
             RepresentationJagoCnn(
                 observation_shape[0] * (stacked_observations + 1)
                 + stacked_observations,
-                256,
+                64,
                 fc_representation_layers,
                 encoding_size,
             )
@@ -900,7 +901,7 @@ class MuZeroJagoNetwork(AbstractNetwork):
         encoded_state = self.representation_network(
             observation#.view(observation.shape[0], -1)
         )
-        return encoded_state
+        return self.normalize_state(encoded_state)
 
     def dynamics(self, encoded_state, action):
         action_one_hot = (
@@ -915,7 +916,7 @@ class MuZeroJagoNetwork(AbstractNetwork):
 
         reward = self.dynamics_reward_network(next_encoded_state)
 
-        return next_encoded_state, reward
+        return self.normalize_state(next_encoded_state), reward
 
     def initial_inference(self, observation):
         encoded_state = self.representation_network(observation)
@@ -940,6 +941,14 @@ class MuZeroJagoNetwork(AbstractNetwork):
         next_encoded_state, reward = self.dynamics(encoded_state, action)
         policy_logits, value = self.prediction(next_encoded_state)
         return value, reward, policy_logits, next_encoded_state
+
+    @staticmethod
+    def normalize_state(state):
+        min_state = state.min(1, keepdim=True)[0]
+        max_state = state.max(1, keepdim=True)[0]
+        scale = max_state - min_state
+        state_normalized = (state - min_state) / scale
+        return state_normalized
 
 
 def mlp(

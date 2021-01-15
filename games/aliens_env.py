@@ -53,8 +53,8 @@ class Game(AbstractGame):
         Returns:
             An array of integers, subset of the action space.
         """
-        return list(range(6))
-        # return list(range(len(self.actions))
+        # return list(range(6))
+        return list(range(min(6, len(self.actions))))
 
     def reset(self):
         if self.life_termination:
@@ -100,6 +100,10 @@ class Game(AbstractGame):
             self.lives = lives
         # Return state, reward, done
         self.last = observation
+
+        if done:
+            reward -= 10
+
         return numpy.expand_dims(observation, axis=0), reward, done
 
     def close(self):
@@ -145,7 +149,7 @@ class MuZeroConfig:
         self.num_workers = 4  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = True if torch.cuda.is_available() else False
         self.max_moves = 37000  # Maximum number of moves if game is not finished before
-        self.num_simulations = 20  # Number of future moves self-simulated
+        self.num_simulations = 25  # Number of future moves self-simulated
         self.discount = 0.99  # Chronological discount of the reward
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
@@ -160,7 +164,7 @@ class MuZeroConfig:
 
 
         ### Network
-        self.network = "resnet"  # "resnet" / "fullyconnected"
+        self.network = "jago"  # "resnet" / "fullyconnected"
         self.support_size = 100  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
 
         # Residual Network
@@ -175,12 +179,12 @@ class MuZeroConfig:
         self.resnet_fc_policy_layers = [64]  # Define the hidden layers in the policy head of the prediction network
 
         # Fully Connected Network
-        self.encoding_size = 16
+        self.encoding_size = 64
         self.fc_representation_layers = [256, 256]  # Define the hidden layers in the representation network
         self.fc_dynamics_layers = [256, 256]  # Define the hidden layers in the dynamics network
-        self.fc_reward_layers = [256, 256]  # Define the hidden layers in the reward network
-        self.fc_value_layers = [256, 256]  # Define the hidden layers in the value network
-        self.fc_policy_layers = [256, 256]  # Define the hidden layers in the policy network
+        self.fc_reward_layers = [256, 64]  # Define the hidden layers in the reward network
+        self.fc_value_layers = [256, 64]  # Define the hidden layers in the value network
+        self.fc_policy_layers = [256, 64]  # Define the hidden layers in the policy network
 
 
 
@@ -188,7 +192,7 @@ class MuZeroConfig:
         self.results_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../results", os.path.basename(__file__)[:-3], datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
         self.training_steps = int(1000e3)  # Total number of training steps (ie weights update according to a batch)
-        self.batch_size = 64  # Number of parts of games to train on at each training step
+        self.batch_size = 128  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 100  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.train_on_gpu = True if torch.cuda.is_available() else False  # Train on GPU if available
