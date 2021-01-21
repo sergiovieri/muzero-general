@@ -232,6 +232,14 @@ def conv2d_init(m):
     n = m.kernel_size[0] * m.kernel_size[1] * m.in_channels
     m.weight.data.normal_(0, math.sqrt(2. / n))
 
+def normalize_state(state):
+    min_state = torch.flatten(state, start_dim=1).min(1, keepdim=True)[0].unsqueeze(-1).unsqueeze(-1)
+    max_state = torch.flatten(state, start_dim=1).max(1, keepdim=True)[0].unsqueeze(-1).unsqueeze(-1)
+    scale = max_state - min_state
+    normalized_state = (state - min_state) / scale
+    return normalized_state
+
+
 G = 8
 
 # Residual block
@@ -418,7 +426,7 @@ class RepresentationNetwork(torch.nn.Module):
         self.resblocks = torch.nn.ModuleList(
             [ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
-        self.bn_state = torch.nn.GroupNorm(G, num_channels)
+        # self.bn_state = torch.nn.GroupNorm(G, num_channels)
 
     def forward(self, x):
         if self.downsample:
@@ -429,7 +437,7 @@ class RepresentationNetwork(torch.nn.Module):
 
         for block in self.resblocks:
             x = block(x)
-        x = self.bn_state(x)
+        # x = self.bn_state(x)
         return x
 
 
@@ -460,7 +468,7 @@ class DynamicsNetwork(torch.nn.Module):
         )
         # self.hidden_state_conv = ConvolutionBlock(num_channels, num_channels, relu=False, zero_init=True)
 
-        self.bn_state = torch.nn.GroupNorm(G, num_channels)
+        # self.bn_state = torch.nn.GroupNorm(G, num_channels)
         # self.bn_reward = torch.nn.GroupNorm(G, num_channels)
         self.conv1x1_reward = torch.nn.Conv2d(num_channels, reduced_channels_reward, 1)
         self.avg_reward = torch.nn.AdaptiveAvgPool2d(1)
@@ -485,7 +493,7 @@ class DynamicsNetwork(torch.nn.Module):
         # x = torch.nn.functional.relu(x)
         for block in self.resblocks:
             x = block(torch.cat((x, act), 1))
-        x = self.bn_state(x)
+        # x = self.bn_state(x)
         # x = self.hidden_state_conv(x)
         # x += inp[:,:x.shape[1]]
         # x = x[:, :self.num_channels]
@@ -540,7 +548,7 @@ class PredictionNetwork(torch.nn.Module):
         policy = torch.nn.functional.relu(policy)
         policy = self.avg_policy(policy)
         value = torch.flatten(value, start_dim=1)
-        policy = torch.flatten(value, start_dim=1)
+        policy = torch.flatten(policy, start_dim=1)
         # value = value.view(-1, self.block_output_size_value)
         # policy = policy.view(-1, self.block_output_size_policy)
         value = self.fc_value(value)
@@ -598,18 +606,15 @@ class MuZeroResidualNetwork(AbstractNetwork):
             else (reduced_channels_policy * observation_shape[1] * observation_shape[2])
         )
 
-        self.representation_network = torch.nn.DataParallel(
-            RepresentationNetwork(
+        self.representation_network = RepresentationNetwork(
                 observation_shape,
                 stacked_observations,
                 num_blocks,
                 num_channels,
                 downsample,
             )
-        )
 
-        self.dynamics_network = torch.nn.DataParallel(
-            DynamicsNetwork(
+        self.dynamics_network = DynamicsNetwork(
                 num_blocks,
                 num_channels,
                 self.action_space_size,
@@ -618,10 +623,9 @@ class MuZeroResidualNetwork(AbstractNetwork):
                 self.full_support_size,
                 block_output_size_reward,
             )
-        )
+        #)
 
-        self.prediction_network = torch.nn.DataParallel(
-            PredictionNetwork(
+        self.prediction_network = PredictionNetwork(
                 action_space_size,
                 num_blocks,
                 num_channels,
@@ -633,7 +637,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
                 block_output_size_value,
                 block_output_size_policy,
             )
-        )
+        #)
 
         # self.hidden_state_bn = torch.nn.GroupNorm(G, num_channels)
 
@@ -648,6 +652,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
     def representation(self, observation):
         encoded_state = self.representation_network(observation)
         # encoded_state = self.hidden_state_bn(encoded_state)
+        encoded_state = normalize_state(encoded_state)
         return encoded_state
 
         # Scale encoded state between [0, 1] (See appendix paper Training)
@@ -691,6 +696,7 @@ class MuZeroResidualNetwork(AbstractNetwork):
         x = torch.cat((encoded_state, action_one_hot), dim=1)
         next_encoded_state, reward = self.dynamics_network(x)
         # next_encoded_state = self.hidden_state_bn(next_encoded_state)
+        next_encoded_state = normalize_state(next_encoded_state)
         return next_encoded_state, reward
 
         # Scale encoded state between [0, 1] (See paper appendix Training)

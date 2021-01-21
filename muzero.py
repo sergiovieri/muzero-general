@@ -1,3 +1,4 @@
+import copy
 import importlib
 import math
 import os
@@ -88,6 +89,7 @@ class MuZero:
                 "weights": None,
                 "optimizer_state": None,
                 "total_reward": 0,
+                "avg_reward": 0,
                 "muzero_reward": 0,
                 "opponent_reward": 0,
                 "episode_length": 0,
@@ -107,25 +109,33 @@ class MuZero:
             }
             self.replay_buffer = {}
 
-            @ray.remote(num_cpus=0, num_gpus=total_gpus)
-            def f():
-                return torch.cuda.is_available()
+            # @ray.remote(num_cpus=0, num_gpus=1)
+            # def f():
+            #     return torch.cuda.is_available()
 
-            print('First check', ray.get(f.remote()))
+            # print('First check', ray.get(f.remote()))
+            # [f.remote(), f.remote()]
 
             # Trick to force DataParallel to stay on CPU
-            @ray.remote(num_cpus=1, num_gpus=0)
-            def get_initial_weights(config):
-                model = models.MuZeroNetwork(config)
-                weigths = model.get_weights()
-                summary = str(model).replace("\n", " \n\n")
-                return weigths, summary
+            # @ray.remote(num_cpus=1, num_gpus=0)
+            # def get_initial_weights(config):
+            #     model = models.MuZeroNetwork(config)
+            #     weigths = model.get_weights()
+            #     summary = str(model).replace("\n", " \n\n")
+            #     return weigths, summary
 
-            self.checkpoint["weights"], self.summary = ray.get(
-                get_initial_weights.remote(self.config)
-            )
-            if total_gpus == 0 or ray.get(f.remote()):
-                break
+            cpu_actor = CPUActor.remote()
+            cpu_weights = cpu_actor.get_initial_weights.remote(self.config)
+
+            # self.checkpoint["weights"], self.summary = ray.get(
+            #     get_initial_weights.remote(self.config)
+            # )
+
+            self.checkpoint["weights"], self.summary = copy.deepcopy(ray.get(cpu_weights))
+
+            break
+            # if total_gpus == 0 or ray.get(f.remote()):
+            #     break
 
         # Workers
         self.self_play_workers = None
@@ -148,7 +158,7 @@ class MuZero:
         # Manage GPUs
         if 0 < self.num_gpus:
             total_required = (
-                self.config.train_on_gpu
+                self.config.train_on_gpu * 3
                 + self.config.num_workers * self.config.selfplay_on_gpu
                 + log_in_tensorboard * self.config.selfplay_on_gpu
                 + self.config.use_last_model_value * self.config.reanalyse_on_gpu
@@ -166,7 +176,8 @@ class MuZero:
         # Initialize workers
         self.training_worker = trainer.Trainer.options(
             num_cpus=0,
-            num_gpus=num_gpus_per_worker if self.config.train_on_gpu else 0,
+            num_gpus=num_gpus_per_worker * 3 if self.config.train_on_gpu else 0,
+            #num_gpus=1,
         ).remote(self.checkpoint, self.config)
 
         self.shared_storage_worker = shared_storage.SharedStorage.remote(
@@ -260,6 +271,7 @@ class MuZero:
         counter = 0
         keys = [
             "total_reward",
+            "avg_reward",
             "muzero_reward",
             "opponent_reward",
             "episode_length",
@@ -283,6 +295,11 @@ class MuZero:
                 writer.add_scalar(
                     "1.Total_reward/1.Total_reward",
                     info["total_reward"],
+                    counter,
+                )
+                writer.add_scalar(
+                    "1.Total_reward/Avg_reward",
+                    info["avg_reward"],
                     counter,
                 )
                 writer.add_scalar(
@@ -336,11 +353,11 @@ class MuZero:
                 writer.add_scalar("3.Loss/Grad_norm", info["grad_norm"], counter)
                 writer.add_scalar("3.Loss/L2_norm", info["l2_norm"], counter)
                 print(
-                    f'Last test reward: {info["total_reward"]:.2f}. Training step: {info["training_step"]}/{self.config.training_steps}. Played games: {info["num_played_games"]}. Loss: {info["total_loss"]:.2f}',
+                        f'Last test reward: {info["total_reward"]:.2f}. Avg reward: {info["avg_reward"]:.2f}. Training step: {info["training_step"]}/{self.config.training_steps}. Played games: {info["num_played_games"]}. Loss: {info["total_loss"]:.2f}',
                     end="\r",
                 )
                 counter += 1
-                time.sleep(0.5)
+                time.sleep(1.0)
         except KeyboardInterrupt:
             pass
 
@@ -477,6 +494,19 @@ class MuZero:
         dm.compare_virtual_with_real_trajectories(obs, game, horizon)
         input("Press enter to close all plots")
         dm.close_all()
+
+
+@ray.remote(num_cpus=0, num_gpus=0)
+class CPUActor:
+    # Trick to force DataParallel to stay on CPU to get weights on CPU even if there is a GPU
+    def __init__(self):
+        pass
+
+    def get_initial_weights(self, config):
+        model = models.MuZeroNetwork(config)
+        weights = model.get_weights()
+        summary = str(model).replace("\n", "\n\n")
+        return weights, summary
 
 
 def hyperparameter_search(

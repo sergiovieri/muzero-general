@@ -26,11 +26,18 @@ class Trainer:
         print('Torch gpu:', torch.cuda.is_available())
         import os
         print("CUDA_VISIBLE_DEVICES: {}".format(os.environ["CUDA_VISIBLE_DEVICES"]))
+        # torch.cuda.device(ray.get_gpu_ids()[0])
+        # print("Current device", torch.cuda.current_device())
         # Initialize the network
         self.model = models.MuZeroNetwork(self.config)
+        self.model.cpu()
+        # self.model.cuda(0)
         self.model.set_weights(copy.deepcopy(initial_checkpoint["weights"]))
+        print("Model device", str(next(self.model.parameters()).device))
         self.model.to(torch.device("cuda" if self.config.train_on_gpu else "cpu"))
+        # self.model.cuda(ray.get_gpu_ids()[0])
         self.model.train()
+        print("Model device", str(next(self.model.parameters()).device))
 
         self.training_step = initial_checkpoint["training_step"]
 
@@ -64,7 +71,7 @@ class Trainer:
 
     def continuous_update_weights(self, replay_buffer, shared_storage):
         # Wait for the replay buffer to be filled
-        while ray.get(shared_storage.get_info.remote("num_played_games")) < 10:
+        while ray.get(shared_storage.get_info.remote("num_played_games")) < 1:
             time.sleep(0.1)
 
         pipelined_batch = replay_buffer.get_batch.remote()
@@ -160,7 +167,7 @@ class Trainer:
             weight_batch = torch.tensor(weight_batch.copy()).float().to(device)
         # observation_numpy = numpy.array(observation_batch, dtype=numpy.float32)
         # observation_batch = torch.tensor(observation_numpy).float().to(device)
-        observation_batch = torch.from_numpy(observation_batch).to(device)
+        observation_batch = torch.from_numpy(observation_batch.copy()).to(device)
         # observation_batch = torch.tensor(observation_batch).float().to(device)
         action_batch = torch.tensor(action_batch).long().to(device).unsqueeze(-1)
         target_value = torch.tensor(target_value).float().to(device)
@@ -215,7 +222,6 @@ class Trainer:
                 rr = models.support_to_scalar(reward[mau:mau+1], self.config.support_size).item()
                 tp = target_policy[mau, i]
                 debug_hist.append((tv, rv, tr, rr))
-                print('Value', torch.softmax(value[mau], dim=0)[100:110].detach().cpu().numpy())
                 # print(f'Weight {weight_batch[mau].item()}')
                 # print(f'Target value {tv:.6f}')
                 # print(f'Value {rv:.6f}')
@@ -238,16 +244,20 @@ class Trainer:
             print('Replace',
                     models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item(),
                     'with',
-                    models.support_to_scalar(torch.log(torch.softmax(current_value[0:1], dim=1)), self.config.support_size).item()
+                    models.support_to_scalar(torch.log(torch.softmax(current_value[0:1], dim=1)), self.config.support_size).item(),
+                    'mix',
+                    models.support_to_scalar(torch.log(
+                        target_value[0:1, i] * 0.2 + torch.softmax(current_value[0:1], dim=1) * 0.8
+                    ), self.config.support_size).item(),
             )
             print('Replace policy',
                     target_policy[0:1, i].detach().cpu().numpy(),
                     'with',
                     torch.softmax(current_policy[0:1], dim=1).detach().cpu().numpy(),
             )
-            target_value[:, i] = torch.softmax(current_value, dim=1)
+            target_value[:, i] = target_value[:, i] * 0.2 + torch.softmax(current_value, dim=1) * 0.8
             # if self.training_step >= 1000:
-            target_policy[:, i] = torch.softmax(current_policy, dim=1)
+            target_policy[:, i] = target_policy[:, i] * 0.1 + torch.softmax(current_policy, dim=1) * 0.9
 
             # current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
             # if i == 1:
@@ -341,7 +351,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss# + 0.1 * next_loss
+        loss = value_loss * self.config.value_loss_weight + 5.0 * reward_loss + policy_loss# + 0.1 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
@@ -352,7 +362,7 @@ class Trainer:
         # Optimize
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2)
         self.optimizer.step()
         self.training_step += 1
 
@@ -388,7 +398,7 @@ class Trainer:
         """
         Update learning rate
         """
-        warmup = 100
+        warmup = 500
         if self.training_step < warmup:
             lr = self.config.lr_init * (self.training_step + 1) / warmup
         else:

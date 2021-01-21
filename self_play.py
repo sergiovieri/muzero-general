@@ -28,6 +28,8 @@ class SelfPlay:
         self.model.to(torch.device("cuda" if self.config.selfplay_on_gpu else "cpu"))
         self.model.eval()
 
+        self.test_results = []
+
     def continuous_self_play(self, shared_storage, replay_buffer, test_mode=False):
         while ray.get(
             shared_storage.get_info.remote("training_step")
@@ -66,7 +68,7 @@ class SelfPlay:
                 print('PLAY TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
                 # Take the best action (no exploration) in test mode
                 game_history = self.play_game(
-                    0,
+                    0.1,
                     self.config.temperature_threshold,
                     False,
                     "self" if len(self.config.players) == 1 else self.config.opponent,
@@ -76,11 +78,18 @@ class SelfPlay:
 
                 print('Played test', sum(game_history.reward_history))
 
+                self.test_results.append(sum(game_history.reward_history))
+                if len(self.test_results) > 10:
+                    self.test_results.pop(0)
+
+                avg_reward = sum(self.test_results) / len(self.test_results)
+
                 # Save to the shared storage
                 shared_storage.set_info.remote(
                     {
                         "episode_length": len(game_history.action_history) - 1,
                         "total_reward": sum(game_history.reward_history),
+                        "avg_reward": avg_reward,
                         "mean_value": numpy.mean(
                             [value for value in game_history.root_values if value]
                         ),
@@ -599,7 +608,7 @@ class GameHistory:
         ):
             if 0 <= past_observation_index:
                 obs = self.observation_history[past_observation_index] / 255.0
-                act = numpy.ones_like(stacked_observations[0], dtype=numpy.float32) * self.action_history[past_observation_index + 1]
+                act = numpy.ones_like(stacked_observations[0], dtype=numpy.float32) * self.action_history[past_observation_index + 1] / 18.0
                 #previous_observation = numpy.concatenate(
                 #    (
                 #        self.observation_history[past_observation_index] / 255.0,
