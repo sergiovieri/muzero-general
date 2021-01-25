@@ -429,6 +429,7 @@ class MuZero:
                         render,
                         opponent,
                         muzero_player,
+                        test_mode=True,
                     )
                 )
             )

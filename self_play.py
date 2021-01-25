@@ -150,6 +150,7 @@ class SelfPlay:
 
         if render:
             self.game.render()
+            self.game.training = False
 
         prev_action = 0
         repeat_left = 0

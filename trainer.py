@@ -215,6 +215,11 @@ class Trainer:
             value, reward, policy_logits, hidden_state = self.model.recurrent_inference(
                 hidden_state, action_batch[:, i]
             )
+            predicted_observation = self.model.derepresentation(hidden_state)
+            current_loss = torch.nn.MSELoss(reduction='none')(observation_batch[:, i, 0:1], predicted_observation).view(batch_size, -1).mean(dim=1)
+            next_loss += current_loss
+            print(i, current_loss.mean().item())
+
             if mau is not None:
                 tv = models.support_to_scalar(torch.log(target_value[mau:mau+1, i]), self.config.support_size).item()
                 rv = models.support_to_scalar(value[mau:mau+1], self.config.support_size).item()
@@ -351,7 +356,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + 5.0 * reward_loss + policy_loss# + 0.1 * next_loss
+        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss + next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights

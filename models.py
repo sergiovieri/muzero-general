@@ -441,6 +441,92 @@ class RepresentationNetwork(torch.nn.Module):
         return x
 
 
+class UpSample(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+
+        self.deconv1 = torch.nn.ConvTranspose2d(
+            in_channels,
+            in_channels,
+            kernel_size=4,
+            stride=2,
+            padding=1,
+        )
+
+        self.resblocks1 = torch.nn.ModuleList(
+            [ResidualBlock(in_channels) for _ in range(3)]
+        )
+
+        self.deconv2 = torch.nn.ConvTranspose2d(
+            in_channels,
+            in_channels,
+            kernel_size=4,
+            stride=2,
+            padding=1,
+        )
+
+        self.resblocks2 = torch.nn.ModuleList(
+            [ResidualBlock(in_channels) for _ in range(3)]
+        )
+        self.deconv3 = torch.nn.ConvTranspose2d(
+            in_channels,
+            in_channels // 2,
+            kernel_size=4,
+            stride=2,
+            padding=1,
+        )
+
+        self.resblocks3 = torch.nn.ModuleList(
+            [ResidualBlock(in_channels // 2) for _ in range(2)]
+        )
+
+        self.deconv4 = torch.nn.ConvTranspose2d(
+            in_channels // 2,
+            out_channels,
+            kernel_size=4,
+            stride=2,
+            padding=1,
+        )
+
+    def forward(self, x):
+        x = self.deconv1(x)
+        x = torch.nn.functional.relu_(x)
+        for block in self.resblocks1:
+            x = block(x)
+        x = self.deconv2(x)
+        x = torch.nn.functional.relu_(x)
+        for block in self.resblocks2:
+            x = block(x)
+        x = self.deconv3(x)
+        x = torch.nn.functional.relu_(x)
+        for block in self.resblocks3:
+            x = block(x)
+        x = self.deconv4(x)
+        x = torch.sigmoid(x)
+        return x
+
+
+class DerepresentationNetwork(torch.nn.Module):
+    def __init__(
+        self,
+        observation_shape,
+        num_blocks,
+        num_channels,
+    ):
+        super().__init__()
+        self.resblocks = torch.nn.ModuleList(
+            [ResidualBlock(num_channels) for _ in range(num_blocks)]
+        )
+        self.upsample_net = UpSample(num_channels, observation_shape[0])
+
+    def forward(self, x):
+        for block in self.resblocks:
+            x = block(x)
+
+        x = self.upsample_net(x)
+        return x
+
+
 class DynamicsNetwork(torch.nn.Module):
     def __init__(
         self,
@@ -639,6 +725,12 @@ class MuZeroResidualNetwork(AbstractNetwork):
             )
         #)
 
+        self.derepresentation_network = DerepresentationNetwork(
+            observation_shape,
+            num_blocks,
+            num_channels,
+        )
+
         # self.hidden_state_bn = torch.nn.GroupNorm(G, num_channels)
 
         # for m in self.modules():
@@ -724,6 +816,9 @@ class MuZeroResidualNetwork(AbstractNetwork):
             next_encoded_state - min_next_encoded_state
         ) / scale_next_encoded_state
         return next_encoded_state_normalized, reward
+
+    def derepresentation(self, encoded_state):
+        return self.derepresentation_network(encoded_state)
 
     def initial_inference(self, observation):
         encoded_state = self.representation(observation)
