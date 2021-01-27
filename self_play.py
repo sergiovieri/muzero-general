@@ -153,8 +153,8 @@ class SelfPlay:
 
         prev_action = 0
         repeat_left = 0
-        repeat_chance = 0.0 if test_mode else 0.0
-        repeat_amount = 4
+        repeat_chance = 0.0 if test_mode else 0.05
+        repeat_amount = 10
 
         with torch.no_grad():
             while (
@@ -190,7 +190,8 @@ class SelfPlay:
 
                     if repeat_left > 0:
                         repeat_left -= 1
-                        action = prev_action
+                        # action = prev_action
+                        action = self.select_action(root, 0)
                     elif numpy.random.rand() < repeat_chance:
                         repeat_left = repeat_amount
                         prev_action = action

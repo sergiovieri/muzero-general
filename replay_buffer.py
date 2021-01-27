@@ -242,7 +242,7 @@ class ReplayBuffer:
 
             value = last_step_value * self.config.discount ** td_steps
         else:
-            value = 0
+            value = -10
 
         for i, reward in enumerate(
             game_history.reward_history[index + 1 : bootstrap_index + 1]
@@ -276,7 +276,7 @@ class ReplayBuffer:
                 target_policies.append(game_history.child_visits[current_index])
                 actions.append(game_history.action_history[current_index])
             elif current_index == len(game_history.root_values):
-                target_values.append(0)
+                target_values.append(-10)
                 target_rewards.append(game_history.reward_history[current_index])
                 # Uniform policy
                 target_policies.append(
@@ -288,7 +288,7 @@ class ReplayBuffer:
                 actions.append(game_history.action_history[current_index])
             else:
                 # States past the end of games are treated as absorbing states
-                target_values.append(0)
+                target_values.append(-10)
                 target_rewards.append(0)
                 # Uniform policy
                 target_policies.append(

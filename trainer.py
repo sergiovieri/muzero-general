@@ -71,7 +71,7 @@ class Trainer:
 
     def continuous_update_weights(self, replay_buffer, shared_storage):
         # Wait for the replay buffer to be filled
-        while ray.get(shared_storage.get_info.remote("num_played_games")) < 1:
+        while ray.get(shared_storage.get_info.remote("num_played_games")) < 10:
             time.sleep(0.1)
 
         pipelined_batch = replay_buffer.get_batch.remote()
@@ -351,7 +351,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + 5.0 * reward_loss + policy_loss# + 0.1 * next_loss
+        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss# + 0.1 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
