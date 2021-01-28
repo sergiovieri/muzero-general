@@ -330,6 +330,49 @@ class ConvolutionBlock(torch.nn.Module):
         x = torch.nn.functional.relu(x)
         return x
 
+
+class DeconvolutionBlock(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+        super().__init__()
+        self.deconv = torch.nn.ConvTranspose2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=False,
+        )
+        self.bn = torch.nn.GroupNorm(G if out_channels >= G * 2 else out_channels // 2, out_channels)
+
+    def forward(self, x):
+        x = self.deconv(x)
+        x = self.bn(x)
+        x = torch.nn.functional.relu(x)
+        return x
+
+
+class DeconvolutionBlockSkip(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+        super().__init__()
+        self.deconv = torch.nn.ConvTranspose2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=False,
+        )
+        self.bn = torch.nn.GroupNorm(G if out_channels >= G * 2 else out_channels // 2, out_channels)
+
+    def forward(self, x):
+        x, y = x
+        x = self.deconv(x)
+        x = self.bn(x)
+        x += y
+        x = torch.nn.functional.relu(x)
+        return x
+
+
 # Downsample observations before representation network (See paper appendix Network Architecture)
 class DownSample(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -445,7 +488,7 @@ class UpSample(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
 
-        self.deconv1 = torch.nn.ConvTranspose2d(
+        self.deconv1 = DeconvolutionBlock(
             in_channels,
             in_channels,
             kernel_size=4,
@@ -457,7 +500,7 @@ class UpSample(torch.nn.Module):
             [ResidualBlock(in_channels) for _ in range(3)]
         )
 
-        self.deconv2 = torch.nn.ConvTranspose2d(
+        self.deconv2 = DeconvolutionBlock(
             in_channels,
             in_channels,
             kernel_size=4,
@@ -468,7 +511,7 @@ class UpSample(torch.nn.Module):
         self.resblocks2 = torch.nn.ModuleList(
             [ResidualBlock(in_channels) for _ in range(3)]
         )
-        self.deconv3 = torch.nn.ConvTranspose2d(
+        self.deconv3 = DeconvolutionBlock(
             in_channels,
             in_channels // 2,
             kernel_size=4,
@@ -480,7 +523,7 @@ class UpSample(torch.nn.Module):
             [ResidualBlock(in_channels // 2) for _ in range(2)]
         )
 
-        self.deconv4 = torch.nn.ConvTranspose2d(
+        self.deconv4 = DeconvolutionBlockSkip(
             in_channels // 2,
             out_channels,
             kernel_size=4,
@@ -489,20 +532,17 @@ class UpSample(torch.nn.Module):
         )
 
     def forward(self, x):
+        x, prev_frames = x
         x = self.deconv1(x)
-        x = torch.nn.functional.relu_(x)
         for block in self.resblocks1:
             x = block(x)
         x = self.deconv2(x)
-        x = torch.nn.functional.relu_(x)
         for block in self.resblocks2:
             x = block(x)
         x = self.deconv3(x)
-        x = torch.nn.functional.relu_(x)
         for block in self.resblocks3:
             x = block(x)
-        x = self.deconv4(x)
-        x = torch.sigmoid(x)
+        x = self.deconv4((x, prev_frames))
         return x
 
 
@@ -514,16 +554,24 @@ class DerepresentationNetwork(torch.nn.Module):
         num_channels,
     ):
         super().__init__()
-        self.resblocks = torch.nn.ModuleList(
-            [ResidualBlock(num_channels) for _ in range(num_blocks)]
+        self.upsample_net = UpSample(num_channels, num_channels // 2)
+        # self.resblocks = torch.nn.ModuleList(
+        #     [ResidualBlock(num_channels // 2) for _ in range(num_blocks)]
+        # )
+        self.deconv1 = torch.nn.ConvTranspose2d(
+            num_channels // 2,
+            observation_shape[0],
+            kernel_size=1,
+            stride=1,
+            padding=0,
         )
-        self.upsample_net = UpSample(num_channels, observation_shape[0])
 
     def forward(self, x):
-        for block in self.resblocks:
-            x = block(x)
-
         x = self.upsample_net(x)
+        # for block in self.resblocks:
+        #     x = block(x)
+        x = self.deconv1(x)
+        x = torch.sigmoid(x)
         return x
 
 
@@ -817,8 +865,8 @@ class MuZeroResidualNetwork(AbstractNetwork):
         ) / scale_next_encoded_state
         return next_encoded_state_normalized, reward
 
-    def derepresentation(self, encoded_state):
-        return self.derepresentation_network(encoded_state)
+    def derepresentation(self, encoded_state, prev_frames):
+        return self.derepresentation_network((encoded_state, prev_frames))
 
     def initial_inference(self, observation):
         encoded_state = self.representation(observation)

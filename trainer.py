@@ -1,6 +1,7 @@
 import copy
 import time
 
+import cv2
 import numpy
 import ray
 import torch
@@ -71,7 +72,7 @@ class Trainer:
 
     def continuous_update_weights(self, replay_buffer, shared_storage):
         # Wait for the replay buffer to be filled
-        while ray.get(shared_storage.get_info.remote("num_played_games")) < 1:
+        while ray.get(shared_storage.get_info.remote("num_played_games")) < 10:
             time.sleep(0.1)
 
         pipelined_batch = replay_buffer.get_batch.remote()
@@ -156,6 +157,7 @@ class Trainer:
             gradient_scale_batch,
         ) = batch
 
+
         # print('Update weights')
         # print(f'Weight {weight_batch[:8]}')
         # Keep values as scalars for calculating the priorities for the prioritized replay
@@ -180,6 +182,8 @@ class Trainer:
         # target_reward: batch, num_unroll_steps+1
         # target_policy: batch, num_unroll_steps+1, len(action_space)
         # gradient_scale_batch: batch, num_unroll_steps+1
+
+        prediction_img = numpy.zeros((96*2, 96*action_batch.shape[1]), dtype=numpy.uint8)
 
         print(f'Ori {target_policy[:4].detach().cpu().numpy()}')
         if self.training_step < 100:
@@ -210,15 +214,20 @@ class Trainer:
             models.support_to_scalar(torch.log(target_value[0:1, 0]), self.config.support_size).item(),
             models.support_to_scalar(value[0:1], self.config.support_size).item(),
         )]
+        prediction_img[0:96,0:96] = numpy.array(observation_batch[0,0,0].detach().cpu().numpy() * 255, dtype=numpy.uint8)
         for i in range(1, action_batch.shape[1]):
             # print(f'>>>unroll {i}')
             value, reward, policy_logits, hidden_state = self.model.recurrent_inference(
                 hidden_state, action_batch[:, i]
             )
-            predicted_observation = self.model.derepresentation(hidden_state)
-            current_loss = torch.nn.MSELoss(reduction='none')(observation_batch[:, i, 0:1], predicted_observation).view(batch_size, -1).mean(dim=1)
+            predicted_observation = self.model.derepresentation(hidden_state, observation_batch[:,0,0:1])
+            current_loss = torch.nn.MSELoss(reduction='none')(observation_batch[:, i, 0:1], predicted_observation).view(batch_size, -1)
+            current_loss = torch.clamp(current_loss, min=0.0002)
+            current_loss = current_loss.mean(dim=1)
             next_loss += current_loss
             print(i, current_loss.mean().item())
+            prediction_img[0:96, 96*i:96*(i+1)] = numpy.array(observation_batch[0,i,0].detach().cpu().numpy() * 255, numpy.uint8)
+            prediction_img[96:96*2, 96*i:96*(i+1)] = numpy.array(predicted_observation[0,0].detach().cpu().numpy() * 255, numpy.uint8)
 
             if mau is not None:
                 tv = models.support_to_scalar(torch.log(target_value[mau:mau+1, i]), self.config.support_size).item()
@@ -283,6 +292,8 @@ class Trainer:
 
         if mau is not None:
             print(f'Debug hist {debug_hist}')
+
+        cv2.imwrite('predicted.jpg', numpy.clip(prediction_img, 0, 255))
 
         ## Compute losses
         value_loss, reward_loss, policy_loss = (0, 0, 0)
@@ -356,7 +367,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss + next_loss
+        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss + 100.0 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
