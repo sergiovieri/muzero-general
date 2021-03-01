@@ -454,36 +454,36 @@ class DynamicsNetwork(torch.nn.Module):
     ):
         super().__init__()
         self.num_channels = num_channels
-        # self.conv = ConvolutionBlock(
-        #     num_channels + action_space_size,
-        #     num_channels,
-        # )
+        self.conv = ConvolutionBlock(
+            num_channels + action_space_size,
+            num_channels,
+        )
         # self.conv1 = conv3x3(num_channels + action_space_size, num_channels, bias=False)
         # self.bn1 = torch.nn.GroupNorm(G, num_channels)
         # self.conv2 = conv3x3(num_channels, num_channels, bias=False)
         # self.bn2 = torch.nn.GroupNorm(G, num_channels)
         # self.bn2.weight.data.fill_(0)
         self.resblocks = torch.nn.ModuleList(
-            [ResidualBlock2(num_channels + action_space_size, num_channels, identity_init=False) for _ in range(num_blocks)]
+            [ResidualBlock(num_channels, identity_init=False) for _ in range(num_blocks)]
         )
         # self.hidden_state_conv = ConvolutionBlock(num_channels, num_channels, relu=False, zero_init=True)
 
         # self.bn_state = torch.nn.GroupNorm(G, num_channels)
         # self.bn_reward = torch.nn.GroupNorm(G, num_channels)
         self.conv1x1_reward = torch.nn.Conv2d(num_channels, reduced_channels_reward, 1)
-        self.avg_reward = torch.nn.AdaptiveAvgPool2d(1)
+        # self.avg_reward = torch.nn.AdaptiveAvgPool2d(1)
         # self.conv1x1_reward = ConvolutionBlock(num_channels, reduced_channels_reward, kernel_size=1, padding=0)
         self.block_output_size_reward = block_output_size_reward
-        self.fc = mlp(reduced_channels_reward, fc_reward_layers, full_support_size)
-        # self.fc = mlp(
-        #     self.block_output_size_reward, fc_reward_layers, full_support_size#, zero_last=True
-        # )
+        # self.fc = mlp(reduced_channels_reward, fc_reward_layers, full_support_size)
+        self.fc = mlp(
+            self.block_output_size_reward, fc_reward_layers, full_support_size#, zero_last=True
+        )
 
     def forward(self, x):
-        act = x[:, self.num_channels:]
-        x = x[:, :self.num_channels]
+        # act = x[:, self.num_channels:]
+        # x = x[:, :self.num_channels]
         # inp = x
-        # x = self.conv(x)
+        x = self.conv(x)
         # x = self.conv1(x)
         # x = self.bn1(x)
         # x = torch.nn.functional.relu(x)
@@ -492,7 +492,8 @@ class DynamicsNetwork(torch.nn.Module):
         # x += inp[:, :x.shape[1]]
         # x = torch.nn.functional.relu(x)
         for block in self.resblocks:
-            x = block(torch.cat((x, act), 1))
+            # x = block(torch.cat((x, act), 1))
+            x = block(x)
         # x = self.bn_state(x)
         # x = self.hidden_state_conv(x)
         # x += inp[:,:x.shape[1]]
@@ -501,9 +502,9 @@ class DynamicsNetwork(torch.nn.Module):
         # x = self.bn_reward(x)
         x = self.conv1x1_reward(x)
         x = torch.nn.functional.relu(x)
-        x = self.avg_reward(x)
-        x = torch.flatten(x, start_dim=1)
-        # x = x.view(-1, self.block_output_size_reward)
+        # x = self.avg_reward(x)
+        # x = torch.flatten(x, start_dim=1)
+        x = x.view(-1, self.block_output_size_reward)
         reward = self.fc(x)
         return state, reward
 
@@ -524,33 +525,33 @@ class PredictionNetwork(torch.nn.Module):
     ):
         super().__init__()
         self.conv1x1_value = torch.nn.Conv2d(num_channels, reduced_channels_value, 1)
-        self.avg_value = torch.nn.AdaptiveAvgPool2d(1)
+        # self.avg_value = torch.nn.AdaptiveAvgPool2d(1)
         # self.conv1x1_value = ConvolutionBlock(num_channels, reduced_channels_value, kernel_size=1, padding=0)
         self.conv1x1_policy = torch.nn.Conv2d(num_channels, reduced_channels_policy, 1)
-        self.avg_policy = torch.nn.AdaptiveAvgPool2d(1)
+        # self.avg_policy = torch.nn.AdaptiveAvgPool2d(1)
         # self.conv1x1_policy = ConvolutionBlock(num_channels, reduced_channels_policy, kernel_size=1, padding=0)
         self.block_output_size_value = block_output_size_value
         self.block_output_size_policy = block_output_size_policy
-        self.fc_value = mlp(reduced_channels_value, fc_value_layers, full_support_size)
-        self.fc_policy = mlp(reduced_channels_policy, fc_policy_layers, action_space_size)
-        # self.fc_value = mlp(
-        #     self.block_output_size_value, fc_value_layers, full_support_size#, zero_last=True
-        # )
-        # self.fc_policy = mlp(
-        #     self.block_output_size_policy, fc_policy_layers, action_space_size,
-        # )
+        # self.fc_value = mlp(reduced_channels_value, fc_value_layers, full_support_size)
+        # self.fc_policy = mlp(reduced_channels_policy, fc_policy_layers, action_space_size)
+        self.fc_value = mlp(
+            self.block_output_size_value, fc_value_layers, full_support_size#, zero_last=True
+        )
+        self.fc_policy = mlp(
+            self.block_output_size_policy, fc_policy_layers, action_space_size,
+        )
 
     def forward(self, x):
         value = self.conv1x1_value(x)
         value = torch.nn.functional.relu(value)
-        value = self.avg_value(value)
+        # value = self.avg_value(value)
         policy = self.conv1x1_policy(x)
         policy = torch.nn.functional.relu(policy)
-        policy = self.avg_policy(policy)
-        value = torch.flatten(value, start_dim=1)
-        policy = torch.flatten(policy, start_dim=1)
-        # value = value.view(-1, self.block_output_size_value)
-        # policy = policy.view(-1, self.block_output_size_policy)
+        # policy = self.avg_policy(policy)
+        # value = torch.flatten(value, start_dim=1)
+        # policy = torch.flatten(policy, start_dim=1)
+        value = value.view(-1, self.block_output_size_value)
+        policy = policy.view(-1, self.block_output_size_policy)
         value = self.fc_value(value)
         policy = self.fc_policy(policy)
         return policy, value

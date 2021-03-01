@@ -170,13 +170,13 @@ class MuZeroConfig:
         # Residual Network
         self.downsample = "resnet"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
         self.blocks = 8  # Number of blocks in the ResNet
-        self.channels = 64  # Number of channels in the ResNet
-        self.reduced_channels_reward = 64  # Number of channels in reward head
-        self.reduced_channels_value = 64  # Number of channels in value head
-        self.reduced_channels_policy = 64  # Number of channels in policy head
-        self.resnet_fc_reward_layers = [64]  # Define the hidden layers in the reward head of the dynamic network
-        self.resnet_fc_value_layers = [64]  # Define the hidden layers in the value head of the prediction network
-        self.resnet_fc_policy_layers = [64]  # Define the hidden layers in the policy head of the prediction network
+        self.channels = 128  # Number of channels in the ResNet
+        self.reduced_channels_reward = 32  # Number of channels in reward head
+        self.reduced_channels_value = 32  # Number of channels in value head
+        self.reduced_channels_policy = 32  # Number of channels in policy head
+        self.resnet_fc_reward_layers = [128]  # Define the hidden layers in the reward head of the dynamic network
+        self.resnet_fc_value_layers = [128]  # Define the hidden layers in the value head of the prediction network
+        self.resnet_fc_policy_layers = []  # Define the hidden layers in the policy head of the prediction network
 
         # Fully Connected Network
         self.encoding_size = 16
@@ -192,7 +192,7 @@ class MuZeroConfig:
         self.results_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../results", os.path.basename(__file__)[:-3], datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
         self.training_steps = int(1000e3)  # Total number of training steps (ie weights update according to a batch)
-        self.batch_size = 256  # Number of parts of games to train on at each training step
+        self.batch_size = 128  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 100  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.train_on_gpu = True if torch.cuda.is_available() else False  # Train on GPU if available
@@ -202,10 +202,10 @@ class MuZeroConfig:
         self.momentum = 0.9  # Used only if optimizer is SGD
 
         # Exponential learning rate schedule
-        self.lr_init = 0.01  # Initial learning rate
-        self.lr_decay_rate = 1  # Set it to 1 to use a constant learning rate
+        self.lr_init = 0.005  # Initial learning rate
+        self.lr_decay_rate = 1.0  # Set it to 1 to use a constant learning rate
         # self.lr_decay_steps = 350e3
-        self.lr_decay_steps = 350e3
+        self.lr_decay_steps = 1e5
 
 
 
@@ -225,7 +225,7 @@ class MuZeroConfig:
         ### Adjust the self play / training ratio to avoid over/underfitting
         self.self_play_delay = 0  # Number of seconds to wait after each played game
         self.training_delay = 0  # Number of seconds to wait after each training step
-        self.ratio_min = 0.1  # Desired training steps per self played step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
+        self.ratio_min = 0.2  # Desired training steps per self played step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
         self.ratio_max = None
 
 

@@ -531,12 +531,12 @@ class Node:
         We expand a node using the value, reward and policy prediction obtained from the
         neural network.
         """
-        reward -= 0.1
+        reward -= 0.2
         self.to_play = to_play
         self.reward = reward
         self.hidden_state = hidden_state
 
-        policy_softmax_temp = 1.2
+        policy_softmax_temp = 1.0
         policy_values = torch.softmax(
             torch.tensor([policy_logits[0][a] / policy_softmax_temp for a in actions]), dim=0
         ).tolist()
