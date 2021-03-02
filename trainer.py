@@ -71,7 +71,8 @@ class Trainer:
 
     def continuous_update_weights(self, replay_buffer, shared_storage):
         # Wait for the replay buffer to be filled
-        while ray.get(shared_storage.get_info.remote("num_played_games")) < 10:
+        min_games = 10
+        while ray.get(shared_storage.get_info.remote("num_played_games")) < min_games:
             time.sleep(0.1)
 
         pipelined_batch = replay_buffer.get_batch.remote()
@@ -242,7 +243,7 @@ class Trainer:
                 current_value, _, current_policy, _ = self.model.initial_inference(observation_batch[:, i])
 
             value_mix = 1.0
-            policy_mix = 1.0
+            policy_mix = 0.0 if self.training_step < 100 else 1.0
             print('Replace',
                     models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item(),
                     'with',

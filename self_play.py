@@ -68,7 +68,7 @@ class SelfPlay:
                 print('PLAY TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
                 # Take the best action (no exploration) in test mode
                 game_history = self.play_game(
-                    0.1,
+                    0.25,
                     self.config.temperature_threshold,
                     False,
                     "self" if len(self.config.players) == 1 else self.config.opponent,
@@ -153,7 +153,7 @@ class SelfPlay:
 
         prev_action = 0
         repeat_left = 0
-        repeat_chance = 0.0 if test_mode else 0.05
+        repeat_chance = 0.0 if test_mode else 0.01
         repeat_amount = 10
 
         with torch.no_grad():
@@ -178,7 +178,7 @@ class SelfPlay:
                         stacked_observations,
                         self.game.legal_actions(),
                         self.game.to_play(),
-                        False if test_mode else True,
+                        True if test_mode else True,
                     )
                     action = self.select_action(
                         root,
@@ -536,7 +536,7 @@ class Node:
         self.reward = reward
         self.hidden_state = hidden_state
 
-        policy_softmax_temp = 1.0
+        policy_softmax_temp = 1.5
         policy_values = torch.softmax(
             torch.tensor([policy_logits[0][a] / policy_softmax_temp for a in actions]), dim=0
         ).tolist()
@@ -600,16 +600,18 @@ class GameHistory:
         index = index % len(self.observation_history)
 
         #stacked_observations = self.observation_history[index].astype(numpy.float32) / 255
-        stacked_observations = numpy.zeros((num_stacked_observations * 2 + 1, *self.observation_history[index].shape),
-                                           dtype=numpy.float32)
-        stacked_observations[0] = self.observation_history[index] / 255.0
-        stacked_index = 1
+        # stacked_observations = numpy.zeros((num_stacked_observations * 2 + 1, *self.observation_history[index].shape),
+        #                                    dtype=numpy.float32)
+        # stacked_observations[0] = self.observation_history[index] / 255.0
+        # stacked_index = 1
+        channels, width, height = self.observation_history[index].shape
+        stacked_observations = [self.observation_history[index] / 255.0]
         for past_observation_index in reversed(
             range(index - num_stacked_observations, index)
         ):
             if 0 <= past_observation_index:
                 obs = self.observation_history[past_observation_index] / 255.0
-                act = numpy.ones_like(stacked_observations[0], dtype=numpy.float32) * self.action_history[past_observation_index + 1] / 18.0
+                act = numpy.ones((1, width, height), dtype=numpy.float32) * self.action_history[past_observation_index + 1] / 18.0
                 #previous_observation = numpy.concatenate(
                 #    (
                 #        self.observation_history[past_observation_index] / 255.0,
@@ -621,7 +623,7 @@ class GameHistory:
                 #)
             else:
                 obs = numpy.zeros_like(self.observation_history[index], dtype=numpy.float32)
-                act = numpy.zeros_like(stacked_observations[0], dtype=numpy.float32)
+                act = numpy.zeros((1, width, height), dtype=numpy.float32)
                 # previous_observation = numpy.concatenate(
                 #     (
                 #         numpy.zeros_like(self.observation_history[index]),
@@ -629,15 +631,18 @@ class GameHistory:
                 #     )
                 # )
 
-            stacked_observations[stacked_index] = obs
-            stacked_observations[stacked_index + 1] = act
-            stacked_index += 2
+            stacked_observations.append(obs)
+            stacked_observations.append(act)
+            # stacked_observations[stacked_index] = obs
+            # stacked_observations[stacked_index + 1] = act
+            # stacked_index += 2
             # stacked_observations = numpy.concatenate(
             #     (stacked_observations, previous_observation)
             # )
 
-        assert stacked_index == len(stacked_observations)
-        stacked_observations = numpy.concatenate(stacked_observations)
+        # assert stacked_index == len(stacked_observations)
+        stacked_observations = numpy.concatenate(stacked_observations).astype(numpy.float32)
+        assert stacked_observations.shape == (channels * (num_stacked_observations + 1) + num_stacked_observations, width, height)
         return stacked_observations
 
 

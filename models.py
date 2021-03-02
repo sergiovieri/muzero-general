@@ -40,12 +40,11 @@ class MuZeroNetwork:
                 config.observation_shape,
                 config.stacked_observations,
                 len(config.action_space),
-                config.encoding_size,
-                config.fc_reward_layers,
-                config.fc_value_layers,
-                config.fc_policy_layers,
-                config.fc_representation_layers,
-                config.fc_dynamics_layers,
+                config.jago_blocks,
+                config.jago_encoding_size,
+                config.jago_fc_reward_layers,
+                config.jago_fc_value_layers,
+                config.jago_fc_policy_layers,
                 config.support_size,
             )
         else:
@@ -235,6 +234,14 @@ def conv2d_init(m):
 def normalize_state(state):
     min_state = torch.flatten(state, start_dim=1).min(1, keepdim=True)[0].unsqueeze(-1).unsqueeze(-1)
     max_state = torch.flatten(state, start_dim=1).max(1, keepdim=True)[0].unsqueeze(-1).unsqueeze(-1)
+    scale = max_state - min_state
+    normalized_state = (state - min_state) / scale
+    return normalized_state
+
+def normalize_state_fc(state):
+    assert len(state.shape) == 2
+    min_state = state.min(1, keepdim=True)[0]
+    max_state = state.max(1, keepdim=True)[0]
     scale = max_state - min_state
     normalized_state = (state - min_state) / scale
     return normalized_state
@@ -754,6 +761,57 @@ class MuZeroResidualNetwork(AbstractNetwork):
 ########### End ResNet ###########
 ##################################
 
+
+class FCBlock(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        assert out_channels >= G * 2
+        super().__init__()
+        self.fc = torch.nn.Linear(in_channels, out_channels, bias=False)
+        # self.bn = torch.nn.GroupNorm(G, out_channels)
+
+    def forward(self, x):
+        x = self.fc(x)
+        # x = self.bn(x)
+        x = torch.nn.functional.relu(x)
+        return x
+
+
+class FCResidualBlock(torch.nn.Module):
+    def __init__(self, num_channels):
+        assert num_channels >= G * 2
+        super().__init__()
+        self.fc1 = torch.nn.Linear(num_channels, num_channels)
+        self.bn1 = torch.nn.GroupNorm(G, num_channels)
+        self.fc2 = torch.nn.Linear(num_channels, num_channels)
+        self.bn2 = torch.nn.GroupNorm(G, num_channels)
+
+    def forward(self, x):
+        inp = x
+        x = self.fc1(x)
+        x = self.bn1(x)
+        x = torch.nn.functional.relu(x)
+        x = self.fc2(x)
+        x = self.bn2(x)
+        x += inp
+        x = torch.nn.functional.relu(x)
+        return x
+
+
+class FCOutput(torch.nn.Module):
+    def __init__(self, in_channels, mid_channels, out_channels):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(in_channels, mid_channels)
+        # self.bn = torch.nn.GroupNorm(G, mid_channels)
+        self.fc2 = torch.nn.Linear(mid_channels, out_channels)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        # x = self.bn(x)
+        x = torch.nn.functional.relu(x)
+        x = self.fc2(x)
+        return x
+
+
 class RepresentationJago(torch.nn.Module):
     def __init__(
         self,
@@ -763,61 +821,58 @@ class RepresentationJago(torch.nn.Module):
     ):
         super().__init__()
         num_channels = 256
-        self.conv1 = torch.nn.Conv2d(
+        num_blocks = 8
+        self.conv1 = ConvolutionBlock(
             observation_shape[0] * (stacked_observations + 1)
             + stacked_observations,
             num_channels // 2,
-            kernel_size=3,
             stride=2,
-            padding=1,
-            bias=False,
         )
-        self.bn1 = torch.nn.BatchNorm2d()
-        self.resblocks1 = torch.nn.Modulelist(
-            [ResidualBlock(out_channels // 2) for _ in range(2)]
+        self.resblocks1 = torch.nn.ModuleList(
+            [ResidualBlock(num_channels // 2) for _ in range(2)]
         )
-        self.conv2 = torch.nn.Conv2d(
+        self.conv2 = ConvolutionBlock(
             num_channels // 2,
             num_channels,
-            kernel_size=3,
             stride=2,
-            padding=1,
-            bias=False,
         )
-        self.bn2 = torch.nn.BatchNorm2d()
-        self.resblocks2 = torch.nn.Modulelist(
+        self.resblocks2 = torch.nn.ModuleList(
             [ResidualBlock(num_channels) for _ in range(3)]
         )
-        self.pooling1 = torch.n.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        self.pooling1 = torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
         self.resblocks3 = torch.nn.ModuleList(
             [ResidualBlock(num_channels) for _ in range(3)]
         )
         self.pooling2 = torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
-        self.conv3 = torch.nn.Conv2d(
-            num_channels,
-            32,
-            kernel_size=3,
-            padding=1,
-            bias=False,
+        self.resblocks4 = torch.nn.ModuleList(
+            [ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
-        self.bn3 = torch.nn.BatchNorm2d()
-        self.fc = mlp(6 * 6 * 32, [16], encoding_size)
+        self.conv3 = ConvolutionBlock(
+            num_channels,
+            num_channels * 2,
+            stride=2,
+        )
+        # self.fc = mlp(3 * 3 * num_channels * 2, [], encoding_size, output_activation=torch.nn.ReLU)
+        self.fc = FCBlock(3 * 3 * num_channels * 2, encoding_size)
 
     def forward(self, x):
-        x = self.bn1(self.conv1(x))
+        x = self.conv1(x)
         for block in self.resblocks1:
             x = block(x)
-        x = self.bn2(self.conv2(x))
+        x = self.conv2(x)
         for block in self.resblocks2:
             x = block(x)
         x = self.pooling1(x)
         for block in self.resblocks3:
             x = block(x)
         x = self.pooling2(x)
-        x = self.bn3(self.conv3(x))
-        x = x.view(-1, 6 * 6 * 32)
+        for block in self.resblocks4:
+            x = block(x)
+        x = self.conv3(x)
+        x = torch.flatten(x, start_dim=1)
         x = self.fc(x)
         return x
+
 
 class RepresentationJagoCnn(torch.nn.Module):
     def __init__(
@@ -844,58 +899,74 @@ class RepresentationJagoCnn(torch.nn.Module):
         x = self.fc(x)
         return x
 
+
+class DynamicsJago(torch.nn.Module):
+    def __init__(
+        self,
+        num_blocks,
+        encoding_size,
+        action_space_size,
+    ):
+        super().__init__()
+        self.fc = FCBlock(encoding_size + action_space_size, encoding_size)
+        self.resblocks = torch.nn.ModuleList(
+            [FCResidualBlock(encoding_size) for _ in range(num_blocks)]
+        )
+
+    def forward(self, x):
+        x = self.fc(x)
+        for block in self.resblocks:
+            x = block(x)
+        return x
+
+
 class MuZeroJagoNetwork(AbstractNetwork):
     def __init__(
         self,
         observation_shape,
         stacked_observations,
         action_space_size,
+        num_blocks,
         encoding_size,
         fc_reward_layers,
         fc_value_layers,
         fc_policy_layers,
-        fc_representation_layers,
-        fc_dynamics_layers,
         support_size,
     ):
         super().__init__()
         self.action_space_size = action_space_size
         self.full_support_size = 2 * support_size + 1
 
+        self.representation_network = RepresentationJago(
+            observation_shape,
+            stacked_observations,
+            encoding_size,
+        )
+
         # self.representation_network = torch.nn.DataParallel(
-        #     RepresentationJago(
-        #         observation_shape,
-        #         stacked_observations,
+        #     RepresentationJagoCnn(
+        #         observation_shape[0] * (stacked_observations + 1)
+        #         + stacked_observations,
+        #         256,
+        #         fc_representation_layers,
         #         encoding_size,
         #     )
         # )
 
-        self.representation_network = torch.nn.DataParallel(
-            RepresentationJagoCnn(
-                observation_shape[0] * (stacked_observations + 1)
-                + stacked_observations,
-                256,
-                fc_representation_layers,
-                encoding_size,
-            )
+        self.dynamics_network = DynamicsJago(
+            num_blocks,
+            encoding_size,
+            action_space_size,
         )
 
-        self.dynamics_encoded_state_network = torch.nn.DataParallel(
-            mlp(
-                encoding_size + self.action_space_size,
-                fc_dynamics_layers,
-                encoding_size,
-            )
+        self.dynamics_reward_network = FCOutput(
+            encoding_size, fc_reward_layers, self.full_support_size
         )
-        self.dynamics_reward_network = torch.nn.DataParallel(
-            mlp(encoding_size, fc_reward_layers, self.full_support_size)
+        self.prediction_policy_network = FCOutput(
+            encoding_size, fc_policy_layers, self.action_space_size
         )
-
-        self.prediction_policy_network = torch.nn.DataParallel(
-            mlp(encoding_size, fc_policy_layers, self.action_space_size)
-        )
-        self.prediction_value_network = torch.nn.DataParallel(
-            mlp(encoding_size, fc_value_layers, self.full_support_size)
+        self.prediction_value_network = FCOutput(
+            encoding_size, fc_value_layers, self.full_support_size
         )
 
     def prediction(self, encoded_state):
@@ -904,9 +975,8 @@ class MuZeroJagoNetwork(AbstractNetwork):
         return policy_logits, value
 
     def representation(self, observation):
-        encoded_state = self.representation_network(
-            observation#.view(observation.shape[0], -1)
-        )
+        encoded_state = self.representation_network(observation)
+        encoded_state = normalize_state_fc(encoded_state)
         return encoded_state
 
     def dynamics(self, encoded_state, action):
@@ -918,7 +988,8 @@ class MuZeroJagoNetwork(AbstractNetwork):
         action_one_hot.scatter_(1, action.long(), 1.0)
         x = torch.cat((encoded_state, action_one_hot), dim=1)
 
-        next_encoded_state = self.dynamics_encoded_state_network(x)
+        next_encoded_state = self.dynamics_network(x)
+        next_encoded_state = normalize_state_fc(next_encoded_state)
 
         reward = self.dynamics_reward_network(next_encoded_state)
 

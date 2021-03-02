@@ -39,7 +39,8 @@ class Game(AbstractGame):
 
 
     def _get_state(self):
-        state = cv2.resize(self.ale.getScreenGrayscale(), (96, 96), interpolation=cv2.INTER_LINEAR)
+        state = cv2.resize(self.ale.getScreenRGB2(), (96, 96), interpolation=cv2.INTER_LINEAR)
+        state = numpy.moveaxis(state, -1, 0)
         return state
 
     def legal_actions(self):
@@ -73,12 +74,12 @@ class Game(AbstractGame):
         # self.state_buffer.append(observation)
         self.lives = self.ale.lives()
         self.last = observation
-        return numpy.expand_dims(observation, axis=0)
+        return observation
 
 
     def step(self, action):
         # Repeat action 4 times, max pool over last 2 frames
-        frame_buffer = numpy.zeros((2, 96, 96), dtype=numpy.uint8)
+        frame_buffer = numpy.zeros((2, 3, 96, 96), dtype=numpy.uint8)
         reward, done = 0, False
         for t in range(4):
             reward += self.ale.act(self.actions.get(action))
@@ -104,7 +105,7 @@ class Game(AbstractGame):
         # if done:
         #     reward -= 10
 
-        return numpy.expand_dims(observation, axis=0), reward, done
+        return observation, reward, done
 
     def close(self):
         """
@@ -113,8 +114,8 @@ class Game(AbstractGame):
         self.env.close()
 
     def render(self):
-        # cv2.imshow('obs', self.last)
-        cv2.imshow('screen', self.ale.getScreenRGB()[:, :, ::-1])
+        cv2.imshow('obs', numpy.moveaxis(self.last, 0, -1))
+        # cv2.imshow('screen', self.ale.getScreenRGB()[:, :, ::-1])
         cv2.waitKey(1)
 
     def close(self):
@@ -132,7 +133,7 @@ class MuZeroConfig:
         self.max_num_gpus = None  # Fix the maximum number of GPUs to use. It's usually faster to use a single GPU (set it to 1) if it has enough memory. None will use every GPUs available
 
         ### Game
-        self.observation_shape = (1, 96, 96)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
+        self.observation_shape = (3, 96, 96)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
         self.action_space = action_space  # Fixed list of all possible actions. You should only edit the length
         self.players = list(range(1))  # List of players. You should only edit the length
         self.stacked_observations = 7  # Number of previous observations and previous actions to add to the current observation
@@ -146,7 +147,7 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 5  # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 4  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = True if torch.cuda.is_available() else False
         self.max_moves = 37000  # Maximum number of moves if game is not finished before
         self.num_simulations = 50  # Number of future moves self-simulated
@@ -155,7 +156,7 @@ class MuZeroConfig:
 
         # Root prior exploration noise
         self.root_dirichlet_alpha = 1.0
-        self.root_exploration_fraction = 0.25
+        self.root_exploration_fraction = 0.5
 
         # UCB formula
         self.pb_c_base = 19652
@@ -164,7 +165,7 @@ class MuZeroConfig:
 
 
         ### Network
-        self.network = "jago"  # "resnet" / "fullyconnected"
+        self.network = "resnet"  # "resnet" / "fullyconnected"
         self.support_size = 100  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
 
         # Residual Network
@@ -173,7 +174,7 @@ class MuZeroConfig:
         self.channels = 128  # Number of channels in the ResNet
         self.reduced_channels_reward = 32  # Number of channels in reward head
         self.reduced_channels_value = 32  # Number of channels in value head
-        self.reduced_channels_policy = 32  # Number of channels in policy head
+        self.reduced_channels_policy = 64  # Number of channels in policy head
         self.resnet_fc_reward_layers = [128]  # Define the hidden layers in the reward head of the dynamic network
         self.resnet_fc_value_layers = [128]  # Define the hidden layers in the value head of the prediction network
         self.resnet_fc_policy_layers = []  # Define the hidden layers in the policy head of the prediction network
@@ -231,7 +232,7 @@ class MuZeroConfig:
         ### Adjust the self play / training ratio to avoid over/underfitting
         self.self_play_delay = 0  # Number of seconds to wait after each played game
         self.training_delay = 0  # Number of seconds to wait after each training step
-        self.ratio_min = 0.2  # Desired training steps per self played step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
+        self.ratio_min = 0.25  # Desired training steps per self played step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
         self.ratio_max = None
 
 
@@ -245,9 +246,11 @@ class MuZeroConfig:
         """
         if trained_steps < 100:
             return 100.0
-        if trained_steps < 500e3:
+        elif trained_steps < 5000:
+            return 1.0
+        elif trained_steps < 25000:
             return 0.5
-        elif trained_steps < 750e3:
+        elif trained_steps < 100000:
             return 0.25
         else:
             return 0.1
