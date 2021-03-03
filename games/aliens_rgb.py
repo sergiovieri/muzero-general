@@ -114,7 +114,14 @@ class Game(AbstractGame):
         self.env.close()
 
     def render(self):
-        cv2.imshow('obs', numpy.moveaxis(self.last, 0, -1))
+        cv2.imshow(
+            'obs',
+            cv2.resize(
+                cv2.cvtColor(numpy.moveaxis(self.last, 0, -1), cv2.COLOR_RGB2BGR),
+                (160, 210),
+                interpolation=cv2.INTER_LINEAR,
+            ),
+        )
         # cv2.imshow('screen', self.ale.getScreenRGB()[:, :, ::-1])
         cv2.waitKey(1)
 
@@ -156,7 +163,7 @@ class MuZeroConfig:
 
         # Root prior exploration noise
         self.root_dirichlet_alpha = 1.0
-        self.root_exploration_fraction = 0.5
+        self.root_exploration_fraction = 0.25
 
         # UCB formula
         self.pb_c_base = 19652

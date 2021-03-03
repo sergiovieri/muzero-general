@@ -424,11 +424,12 @@ class MuZero:
             results.append(
                 ray.get(
                     self_play_worker.play_game.remote(
-                        0.1,
+                        0.25,
                         0,
                         render,
                         opponent,
                         muzero_player,
+                        test_mode=True,
                     )
                 )
             )
@@ -635,6 +636,7 @@ if __name__ == "__main__":
                 "Play against MuZero",
                 "Test the game manually",
                 "Hyperparameter search",
+                "Run tests",
                 "Exit",
             ]
             print()
@@ -697,6 +699,8 @@ if __name__ == "__main__":
                     game_name, parametrization, budget, parallel_experiments, 20
                 )
                 muzero = MuZero(game_name, best_hyperparameters)
+            elif choice == 7:
+                muzero.test(render=True, opponent="self", muzero_player=None, num_tests=10)
             else:
                 break
             print("\nDone")

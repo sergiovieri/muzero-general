@@ -113,8 +113,8 @@ class Game(AbstractGame):
         self.env.close()
 
     def render(self):
-        # cv2.imshow('obs', self.last)
-        cv2.imshow('screen', self.ale.getScreenRGB()[:, :, ::-1])
+        cv2.imshow('obs', self.last)
+        # cv2.imshow('screen', self.ale.getScreenRGB()[:, :, ::-1])
         cv2.waitKey(1)
 
     def close(self):

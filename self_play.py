@@ -153,7 +153,7 @@ class SelfPlay:
 
         prev_action = 0
         repeat_left = 0
-        repeat_chance = 0.0 if test_mode else 0.01
+        repeat_chance = 0.0 if test_mode else 0.0
         repeat_amount = 10
 
         with torch.no_grad():
@@ -198,6 +198,7 @@ class SelfPlay:
 
                     if render:
                         print(f'Tree depth: {mcts_info["max_tree_depth"]}')
+                        print(f'MinMaxStats: {mcts_info["min_max_stats"].minimum}, {mcts_info["min_max_stats"].maximum}')
                         print(
                             f"Root value for player {self.game.to_play()}: {root.value():.2f}"
                         )
@@ -208,6 +209,14 @@ class SelfPlay:
                             for action in self.config.action_space
                         ]
                         print(f"Root values: {values_after_planning}")
+
+                        values_after_planning_normalized = [
+                            mcts_info["min_max_stats"].normalize(root.children[action].value())
+                            if action in root.children.keys()
+                            else 0.5
+                            for action in self.config.action_space
+                        ]
+                        print(f"Root values normalized: {values_after_planning_normalized}")
 
                         prior_policy = [
                             root.children[action].prior
@@ -377,6 +386,7 @@ class MCTS:
                 reward,
                 policy_logits,
                 hidden_state,
+                is_root=True,
             )
 
         if add_exploration_noise:
@@ -430,6 +440,7 @@ class MCTS:
         extra_info = {
             "max_tree_depth": max_tree_depth,
             "root_predicted_value": root_predicted_value,
+            "min_max_stats": min_max_stats,
         }
         # print(f'MinMaxStats {min_max_stats.minimum}, {min_max_stats.maximum}')
         # prior = [root.children[a].prior for a in root.children.keys()]
@@ -477,7 +488,7 @@ class MCTS:
                 * (child.value() if len(self.config.players) == 1 else -child.value())
             )
         else:
-            value_score = 0.5 if is_root else 0
+            value_score = 0.5 if is_root else 0.5
 
         return prior_score + value_score
 
@@ -526,7 +537,7 @@ class Node:
             return 0
         return self.value_sum / self.visit_count
 
-    def expand(self, actions, to_play, reward, policy_logits, hidden_state):
+    def expand(self, actions, to_play, reward, policy_logits, hidden_state, is_root=False):
         """
         We expand a node using the value, reward and policy prediction obtained from the
         neural network.
@@ -536,7 +547,7 @@ class Node:
         self.reward = reward
         self.hidden_state = hidden_state
 
-        policy_softmax_temp = 1.5
+        policy_softmax_temp = 2.0 if is_root else 1.5
         policy_values = torch.softmax(
             torch.tensor([policy_logits[0][a] / policy_softmax_temp for a in actions]), dim=0
         ).tolist()
