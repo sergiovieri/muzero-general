@@ -483,7 +483,7 @@ class DynamicsNetwork(torch.nn.Module):
         self.block_output_size_reward = block_output_size_reward
         # self.fc = mlp(reduced_channels_reward, fc_reward_layers, full_support_size)
         self.fc = mlp(
-            self.block_output_size_reward, fc_reward_layers, full_support_size#, zero_last=True
+            self.block_output_size_reward, fc_reward_layers, full_support_size, zero_last=True
         )
 
     def forward(self, x):
@@ -542,7 +542,7 @@ class PredictionNetwork(torch.nn.Module):
         # self.fc_value = mlp(reduced_channels_value, fc_value_layers, full_support_size)
         # self.fc_policy = mlp(reduced_channels_policy, fc_policy_layers, action_space_size)
         self.fc_value = mlp(
-            self.block_output_size_value, fc_value_layers, full_support_size#, zero_last=True
+            self.block_output_size_value, fc_value_layers, full_support_size, zero_last=True
         )
         self.fc_policy = mlp(
             self.block_output_size_policy, fc_policy_layers, action_space_size,
@@ -1035,9 +1035,9 @@ def mlp(
         layers += [torch.nn.Linear(sizes[i], sizes[i + 1]), act()]
     res = torch.nn.Sequential(*layers)
     if zero_last:
-        # res[-2].weight.data.fill_(0)
+        res[-2].weight.data.fill_(0)
         res[-2].bias.data.fill_(0)
-        res[-2].bias.data[output_size // 2] = 1
+        # res[-2].bias.data[output_size // 2] = 1
     return res
 
 

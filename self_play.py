@@ -156,6 +156,9 @@ class SelfPlay:
         repeat_chance = 0.0 if test_mode else 0.0
         repeat_amount = 10
 
+        tree_depth_sum = 0
+        tree_depth_num = 0
+
         with torch.no_grad():
             while (
                 not done and len(game_history.action_history) <= self.config.max_moves
@@ -195,6 +198,9 @@ class SelfPlay:
                     elif numpy.random.rand() < repeat_chance:
                         repeat_left = repeat_amount
                         prev_action = action
+
+                    tree_depth_num += 1
+                    tree_depth_sum += mcts_info["max_tree_depth"]
 
                     if render:
                         print(f'Tree depth: {mcts_info["max_tree_depth"]}')
@@ -260,6 +266,8 @@ class SelfPlay:
                 game_history.observation_history.append(observation)
                 game_history.reward_history.append(reward)
                 game_history.to_play_history.append(self.game.to_play())
+
+        print(f'Avg tree depth {tree_depth_sum / tree_depth_num}')
 
         return game_history
 

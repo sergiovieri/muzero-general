@@ -95,7 +95,7 @@ class ReplayBuffer:
 
             for i in range(game_pos, game_pos + self.config.num_unroll_steps + 1):
                 # if i >= len(game_history.observation_history): break
-                # if i > game_pos: break
+                if i > game_pos: break
                 cpos = min(i, len(game_history.observation_history) - 1)
                 observation_batch[-1].append(game_history.get_stacked_observations(
                     cpos, self.config.stacked_observations

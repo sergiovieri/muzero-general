@@ -239,27 +239,27 @@ class Trainer:
 
             # target_state = self.model.representation(observation_batch[:, i])
 
-            with torch.no_grad():
-                current_value, _, current_policy, _ = self.model.initial_inference(observation_batch[:, i])
+            # with torch.no_grad():
+            #     current_value, _, current_policy, _ = self.model.initial_inference(observation_batch[:, i])
 
-            value_mix = 1.0
-            policy_mix = 0.0 if self.training_step < 100 else 1.0
-            print('Replace',
-                    models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item(),
-                    'with',
-                    models.support_to_scalar(torch.log(torch.softmax(current_value[0:1], dim=1)), self.config.support_size).item(),
-                    'mix',
-                    models.support_to_scalar(torch.log(
-                        target_value[0:1, i] * (1. - value_mix) + torch.softmax(current_value[0:1], dim=1) * value_mix
-                    ), self.config.support_size).item(),
-            )
-            print('Replace policy',
-                    target_policy[0:1, i].detach().cpu().numpy(),
-                    'with',
-                    torch.softmax(current_policy[0:1], dim=1).detach().cpu().numpy(),
-            )
-            target_value[:, i] = target_value[:, i] * (1. - value_mix) + torch.softmax(current_value, dim=1) * value_mix
-            target_policy[:, i] = target_policy[:, i] * (1. - policy_mix) + torch.softmax(current_policy, dim=1) * policy_mix
+            # value_mix = 0.0
+            # policy_mix = 0.0 if self.training_step < 100 else 0.0
+            # print('Replace',
+            #         models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item(),
+            #         'with',
+            #         models.support_to_scalar(torch.log(torch.softmax(current_value[0:1], dim=1)), self.config.support_size).item(),
+            #         'mix',
+            #         models.support_to_scalar(torch.log(
+            #             target_value[0:1, i] * (1. - value_mix) + torch.softmax(current_value[0:1], dim=1) * value_mix
+            #         ), self.config.support_size).item(),
+            # )
+            # print('Replace policy',
+            #         target_policy[0:1, i].detach().cpu().numpy(),
+            #         'with',
+            #         torch.softmax(current_policy[0:1], dim=1).detach().cpu().numpy(),
+            # )
+            # target_value[:, i] = target_value[:, i] * (1. - value_mix) + torch.softmax(current_value, dim=1) * value_mix
+            # target_policy[:, i] = target_policy[:, i] * (1. - policy_mix) + torch.softmax(current_policy, dim=1) * policy_mix
 
             # current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
             # if i == 1:
@@ -280,6 +280,8 @@ class Trainer:
 
         if mau is not None:
             print(f'Debug hist {debug_hist}')
+            print(f'Policy {torch.softmax(predictions[0][2][0:1], dim=1).detach().cpu().numpy()}')
+            print(f'Target {target_policy[0:1, 0].detach().cpu().numpy()}')
 
         ## Compute losses
         value_loss, reward_loss, policy_loss = (0, 0, 0)
