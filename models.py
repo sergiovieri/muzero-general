@@ -380,22 +380,21 @@ class DownSample(torch.nn.Module):
 class DownsampleCNN(torch.nn.Module):
     def __init__(self, in_channels, out_channels, h_w):
         super().__init__()
-        mid_channels = (in_channels + out_channels) // 2
+        mid_channels = out_channels // 2
+        # 96 -> 24 (k=8, p=2, s=4)
+        # 24 -> 11 (k=4, p=0, s=2)
+        # 11 -> 6 (k=3, p=1, s=2)
         self.features = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                in_channels, mid_channels, kernel_size=h_w[0] * 2, stride=4, padding=2
-            ),
+            torch.nn.Conv2d(in_channels, mid_channels, kernel_size=8, stride=4, padding=2),
             torch.nn.ReLU(inplace=True),
-            torch.nn.MaxPool2d(kernel_size=3, stride=2),
-            torch.nn.Conv2d(mid_channels, out_channels, kernel_size=5, padding=2),
+            torch.nn.Conv2d(mid_channels, mid_channels, kernel_size=4, stride=2, padding=0),
             torch.nn.ReLU(inplace=True),
-            torch.nn.MaxPool2d(kernel_size=3, stride=2),
+            torch.nn.Conv2d(mid_channels, out_channels, kernel_size=3, stride=2, padding=1),
+            torch.nn.ReLU(inplace=True),
         )
-        self.avgpool = torch.nn.AdaptiveAvgPool2d(h_w)
 
     def forward(self, x):
         x = self.features(x)
-        x = self.avgpool(x)
         return x
 
 
