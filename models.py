@@ -563,6 +563,65 @@ class PredictionNetwork(torch.nn.Module):
         return policy, value
 
 
+class Encoder(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        depth,
+    ):
+        super().__init__()
+        # 96 -> 23 (k=8, s=4, p=0)
+        # 23 -> 10 (k=4, s=2, p=0)
+        # 10 -> 4 (k=4, s=2, p=0)
+        self.features = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels, depth, kernel_size=8, stride=4, padding=0),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(depth, depth * 2, kernel_size=4, stride=2, padding=0),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(depth * 2, depth * 4, kernel_size=4, stride=2, padding=0),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Flatten(),
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        return x
+
+
+class Decoder(torch.nn.Module):
+    def __init__(
+        self,
+        state_size,
+        depth,
+        out_channels,
+    ):
+        super().__init__()
+        # 1 -> 3 (k=3, s=2)
+        # 3 -> 9 (k=5, s=2)
+        # 9 -> 21 (k=5, s=2)
+        # 21 -> 46 (k=6, s=2)
+        # 46 -> 96 (k=6, s=2)
+        self.depth = depth
+        self.fc = torch.nn.Linear(state_size, depth * 32)
+        self.features = torch.nn.Sequential(
+            torch.nn.ConvTranspose2d(depth * 32, depth * 8, kernel_size=3, stride=2),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.ConvTranspose2d(depth * 8, depth * 4, kernel_size=5, stride=2),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.ConvTranspose2d(depth * 4, depth * 2, kernel_size=5, stride=2),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.ConvTranspose2d(depth * 2, depth, kernel_size=6, stride=2),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.ConvTranspose2d(depth, out_channels, kernel_size=6, stride=2),
+        )
+
+    def forward(self, x):
+        x = self.fc(x)
+        x = x.view(-1, self.depth * 32, 1, 1)
+        x = self.features(x)
+        return x
+
+
 class MuZeroResidualNetwork(AbstractNetwork):
     def __init__(
         self,
@@ -614,43 +673,68 @@ class MuZeroResidualNetwork(AbstractNetwork):
         )
 
         self.representation_network = RepresentationNetwork(
-                observation_shape,
-                stacked_observations,
-                num_blocks,
-                num_channels,
-                downsample,
-            )
+            observation_shape,
+            stacked_observations,
+            num_blocks,
+            num_channels,
+            downsample,
+        )
 
         self.dynamics_network = DynamicsNetwork(
-                num_blocks,
-                num_channels,
-                self.action_space_size,
-                reduced_channels_reward,
-                fc_reward_layers,
-                self.full_support_size,
-                block_output_size_reward,
-            )
-        #)
+            num_blocks,
+            num_channels,
+            self.action_space_size,
+            reduced_channels_reward,
+            fc_reward_layers,
+            self.full_support_size,
+            block_output_size_reward,
+        )
 
         self.prediction_network = PredictionNetwork(
-                action_space_size,
-                num_blocks,
-                num_channels,
-                reduced_channels_value,
-                reduced_channels_policy,
-                fc_value_layers,
-                fc_policy_layers,
-                self.full_support_size,
-                block_output_size_value,
-                block_output_size_policy,
-            )
-        #)
+            action_space_size,
+            num_blocks,
+            num_channels,
+            reduced_channels_value,
+            reduced_channels_policy,
+            fc_value_layers,
+            fc_policy_layers,
+            self.full_support_size,
+            block_output_size_value,
+            block_output_size_policy,
+        )
 
-        # self.hidden_state_bn = torch.nn.GroupNorm(G, num_channels)
+        # VAE
+        self.hidden = 600
+        self.depth = 64
+        self.deter_size = 0
+        self.stoch_size = 600
+        self.encoder = Encoder(
+            observation_shape[0] * (stacked_observations + 1) + stacked_observations,
+            self.depth,
+        )
+
+        self.fc_post = torch.nn.Sequential(
+            torch.nn.Linear(4 * 4 * self.depth * 4, self.hidden),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(self.hidden, self.stoch_size),
+            torch.nn.ReLU(inplace=True),
+        )
+
+        self.decoder = Decoder(
+            self.deter_size + self.stoch_size,
+            self.depth,
+            observation_shape[0],
+        )
 
         # for m in self.modules():
         #     if isinstance(m, torch.nn.Conv2d):
         #         conv2d_init(m)
+
+    def vae_test(self, observation):
+        embed = self.encoder(observation)
+        post = self.fc_post(embed)
+        pred = self.decoder(post)
+        return pred
 
     def prediction(self, encoded_state):
         policy, value = self.prediction_network(encoded_state)
@@ -658,35 +742,8 @@ class MuZeroResidualNetwork(AbstractNetwork):
 
     def representation(self, observation):
         encoded_state = self.representation_network(observation)
-        # encoded_state = self.hidden_state_bn(encoded_state)
         encoded_state = normalize_state(encoded_state)
         return encoded_state
-
-        # Scale encoded state between [0, 1] (See appendix paper Training)
-        min_encoded_state = (
-            encoded_state.view(
-                -1,
-                encoded_state.shape[1],
-                encoded_state.shape[2] * encoded_state.shape[3],
-            )
-            .min(2, keepdim=True)[0]
-            .unsqueeze(-1)
-        )
-        max_encoded_state = (
-            encoded_state.view(
-                -1,
-                encoded_state.shape[1],
-                encoded_state.shape[2] * encoded_state.shape[3],
-            )
-            .max(2, keepdim=True)[0]
-            .unsqueeze(-1)
-        )
-        scale_encoded_state = max_encoded_state - min_encoded_state
-        scale_encoded_state[scale_encoded_state < 1e-5] += 1e-5
-        encoded_state_normalized = (
-            encoded_state - min_encoded_state
-        ) / scale_encoded_state
-        return encoded_state_normalized
 
     def dynamics(self, encoded_state, action):
         # Stack encoded_state with a game specific one hot encoded action (See paper appendix Network Architecture)
@@ -705,32 +762,6 @@ class MuZeroResidualNetwork(AbstractNetwork):
         # next_encoded_state = self.hidden_state_bn(next_encoded_state)
         next_encoded_state = normalize_state(next_encoded_state)
         return next_encoded_state, reward
-
-        # Scale encoded state between [0, 1] (See paper appendix Training)
-        min_next_encoded_state = (
-            next_encoded_state.view(
-                -1,
-                next_encoded_state.shape[1],
-                next_encoded_state.shape[2] * next_encoded_state.shape[3],
-            )
-            .min(2, keepdim=True)[0]
-            .unsqueeze(-1)
-        )
-        max_next_encoded_state = (
-            next_encoded_state.view(
-                -1,
-                next_encoded_state.shape[1],
-                next_encoded_state.shape[2] * next_encoded_state.shape[3],
-            )
-            .max(2, keepdim=True)[0]
-            .unsqueeze(-1)
-        )
-        scale_next_encoded_state = max_next_encoded_state - min_next_encoded_state
-        scale_next_encoded_state[scale_next_encoded_state < 1e-5] += 1e-5
-        next_encoded_state_normalized = (
-            next_encoded_state - min_next_encoded_state
-        ) / scale_next_encoded_state
-        return next_encoded_state_normalized, reward
 
     def initial_inference(self, observation):
         encoded_state = self.representation(observation)

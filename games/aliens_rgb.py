@@ -232,7 +232,7 @@ class MuZeroConfig:
 
         # Reanalyze (See paper appendix Reanalyse)
         self.use_last_model_value = True  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
-        self.reanalyse_on_gpu = True
+        self.reanalyse_on_gpu = True if torch.cuda.is_available() else False
 
 
 

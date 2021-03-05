@@ -1,6 +1,7 @@
 import copy
 import time
 
+import cv2
 import numpy
 import ray
 import torch
@@ -211,6 +212,14 @@ class Trainer:
             models.support_to_scalar(torch.log(target_value[0:1, 0]), self.config.support_size).item(),
             models.support_to_scalar(value[0:1], self.config.support_size).item(),
         )]
+
+        prediction_img = numpy.zeros((3, 96 * 2, 96 * action_batch.shape[1]), dtype=numpy.uint8)
+
+        def append_img(img, r, c):
+            prediction_img[:, 96*r:96*(r+1), 96*c:96*(c+1)] = numpy.clip(img.detach().cpu().numpy() * 255, 0, 255)
+
+        append_img(observation_batch[0, 0, :3], 0, 0)
+
         for i in range(1, action_batch.shape[1]):
             # print(f'>>>unroll {i}')
             value, reward, policy_logits, hidden_state = self.model.recurrent_inference(
@@ -233,6 +242,16 @@ class Trainer:
                 # print(f'!Target value {models.support_to_scalar(torch.log(target_value[0:1, i]), self.config.support_size).item()}')
                 # print(f'!Value {models.support_to_scalar(value[0:1], self.config.support_size).item()}')
                 # print(f'!Reward {models.support_to_scalar(reward[0:1], self.config.support_size).item()}')
+
+            pred = self.model.vae_test(observation_batch[:, i])
+            current_loss = torch.nn.MSELoss(reduction='none')(observation_batch[:, i, :3], pred).view(batch_size, -1)
+            current_loss = torch.clamp(current_loss, min=0.0002)
+            current_loss = current_loss.mean(dim=1)
+            next_loss += current_loss
+            print(i, current_loss.mean().item())
+            append_img(observation_batch[0, i, :3], 0, i)
+            append_img(pred[0], 1, i)
+
             # with torch.no_grad():
             #     target_state = self.model.representation(observation_batch[:, i])
             # target_state.detach_()
@@ -282,6 +301,10 @@ class Trainer:
             print(f'Debug hist {debug_hist}')
             print(f'Policy {torch.softmax(predictions[0][2][0:1], dim=1).detach().cpu().numpy()}')
             print(f'Target {target_policy[0:1, 0].detach().cpu().numpy()}')
+
+        cv2.imwrite('predicted.jpg', cv2.cvtColor(
+            numpy.moveaxis(numpy.clip(prediction_img, 0, 255), 0, -1), cv2.COLOR_RGB2BGR,
+        ))
 
         ## Compute losses
         value_loss, reward_loss, policy_loss = (0, 0, 0)
@@ -355,7 +378,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss# + 0.1 * next_loss
+        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss + 0.1 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
@@ -372,6 +395,7 @@ class Trainer:
 
         # for n, p in self.model.named_parameters():
         #     if p.grad is None:
+        #         print('No grad!!!!')
         #         print(n)
 
         grad_norm = 0.
