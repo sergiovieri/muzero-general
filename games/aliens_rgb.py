@@ -163,7 +163,7 @@ class MuZeroConfig:
 
         # Root prior exploration noise
         self.root_dirichlet_alpha = 1.0
-        self.root_exploration_fraction = 0.25
+        self.root_exploration_fraction = 0.5
 
         # UCB formula
         self.pb_c_base = 19652
@@ -240,7 +240,7 @@ class MuZeroConfig:
         self.self_play_delay = 0  # Number of seconds to wait after each played game
         self.training_delay = 0  # Number of seconds to wait after each training step
         self.ratio_min = 0.25  # Desired training steps per self played step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
-        self.ratio_max = None
+        self.ratio_max = 0.4
 
 
     def visit_softmax_temperature_fn(self, trained_steps):

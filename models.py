@@ -762,15 +762,17 @@ class MuZeroResidualNetwork(AbstractNetwork):
 
 
 class FCBlock(torch.nn.Module):
-    def __init__(self, in_channels, out_channels):
-        assert out_channels >= G * 2
+    def __init__(self, in_channels, out_channels, recurrent):
         super().__init__()
         self.fc = torch.nn.Linear(in_channels, out_channels, bias=False)
-        # self.bn = torch.nn.GroupNorm(G, out_channels)
+        if recurrent:
+            self.bn = torch.nn.LayerNorm(out_channels)
+        else:
+            self.bn = torch.nn.BatchNorm1d(out_channels)
 
     def forward(self, x):
         x = self.fc(x)
-        # x = self.bn(x)
+        x = self.bn(x)
         x = torch.nn.functional.relu(x)
         return x
 
@@ -797,11 +799,14 @@ class FCResidualBlock(torch.nn.Module):
 
 
 class FCOutput(torch.nn.Module):
-    def __init__(self, in_channels, mid_channels, out_channels):
+    def __init__(self, in_channels, mid_channels, out_channels, zero_last=False):
         super().__init__()
         self.fc1 = torch.nn.Linear(in_channels, mid_channels)
-        # self.bn = torch.nn.GroupNorm(G, mid_channels)
+        # self.bn = torch.nn.LayerNorm(mid_channels)
         self.fc2 = torch.nn.Linear(mid_channels, out_channels)
+        if zero_last:
+            self.fc2.weight.data.fill_(0)
+            self.fc2.bias.data.fill_(0)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -877,25 +882,28 @@ class RepresentationJagoCnn(torch.nn.Module):
     def __init__(
         self,
         in_channels,
-        mid_channels,
-        fc_representation_layers,
+        depth,
         encoding_size,
     ):
         super().__init__()
         self.features = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels, mid_channels // 2, kernel_size=8, stride=4, padding=0), # 96 -> 23
+            torch.nn.Conv2d(in_channels, depth, kernel_size=8, stride=4, padding=0), # 96 -> 23
+            torch.nn.BatchNorm2d(depth),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(mid_channels // 2, mid_channels, kernel_size=5, stride=2, padding=0), # 23 -> 10
-            torch.nn.Conv2d(mid_channels, mid_channels, kernel_size=3, stride=1, padding=0), # 10 -> 8
+            torch.nn.Conv2d(depth, depth * 2, kernel_size=5, stride=2, padding=0), # 23 -> 10
+            torch.nn.BatchNorm2d(depth * 2),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(depth * 2, depth * 2, kernel_size=3, stride=1, padding=0), # 10 -> 8
+            torch.nn.BatchNorm2d(depth * 2),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Flatten(),
+            torch.nn.Linear(8 * 8 * depth * 2, encoding_size),
+            torch.nn.LayerNorm(encoding_size),
             torch.nn.ReLU(inplace=True),
         )
-        self.conv_output_size = 8 * 8 * mid_channels
-        self.fc = mlp(self.conv_output_size, fc_representation_layers, encoding_size)
 
     def forward(self, x):
         x = self.features(x)
-        x = x.view(-1, self.conv_output_size)
-        x = self.fc(x)
         return x
 
 
@@ -907,15 +915,17 @@ class DynamicsJago(torch.nn.Module):
         action_space_size,
     ):
         super().__init__()
-        self.fc = FCBlock(encoding_size + action_space_size, encoding_size)
-        self.resblocks = torch.nn.ModuleList(
-            [FCResidualBlock(encoding_size) for _ in range(num_blocks)]
-        )
+        self.fc1 = FCBlock(encoding_size + action_space_size, encoding_size, True)
+        self.fc2 = FCBlock(encoding_size, encoding_size, True)
+        # self.resblocks = torch.nn.ModuleList(
+        #     [FCResidualBlock(encoding_size) for _ in range(num_blocks)]
+        # )
 
     def forward(self, x):
-        x = self.fc(x)
-        for block in self.resblocks:
-            x = block(x)
+        x = self.fc1(x)
+        x = self.fc2(x)
+        # for block in self.resblocks:
+        #     x = block(x)
         return x
 
 
@@ -936,9 +946,16 @@ class MuZeroJagoNetwork(AbstractNetwork):
         self.action_space_size = action_space_size
         self.full_support_size = 2 * support_size + 1
 
-        self.representation_network = RepresentationJago(
-            observation_shape,
-            stacked_observations,
+        # self.representation_network = RepresentationJago(
+        #     observation_shape,
+        #     stacked_observations,
+        #     encoding_size,
+        # )
+
+        self.representation_network = RepresentationJagoCnn(
+            observation_shape[0] * (stacked_observations + 1)
+            + stacked_observations,
+            32,
             encoding_size,
         )
 
@@ -959,13 +976,13 @@ class MuZeroJagoNetwork(AbstractNetwork):
         )
 
         self.dynamics_reward_network = FCOutput(
-            encoding_size, fc_reward_layers, self.full_support_size
+            encoding_size, fc_reward_layers, self.full_support_size, zero_last=True,
         )
         self.prediction_policy_network = FCOutput(
             encoding_size, fc_policy_layers, self.action_space_size
         )
         self.prediction_value_network = FCOutput(
-            encoding_size, fc_value_layers, self.full_support_size
+            encoding_size, fc_value_layers, self.full_support_size, zero_last=True,
         )
 
     def prediction(self, encoded_state):
@@ -975,7 +992,7 @@ class MuZeroJagoNetwork(AbstractNetwork):
 
     def representation(self, observation):
         encoded_state = self.representation_network(observation)
-        encoded_state = normalize_state_fc(encoded_state)
+        # encoded_state = normalize_state_fc(encoded_state)
         return encoded_state
 
     def dynamics(self, encoded_state, action):
@@ -988,7 +1005,7 @@ class MuZeroJagoNetwork(AbstractNetwork):
         x = torch.cat((encoded_state, action_one_hot), dim=1)
 
         next_encoded_state = self.dynamics_network(x)
-        next_encoded_state = normalize_state_fc(next_encoded_state)
+        # next_encoded_state = normalize_state_fc(next_encoded_state)
 
         reward = self.dynamics_reward_network(next_encoded_state)
 

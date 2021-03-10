@@ -355,7 +355,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss# + 0.1 * next_loss
+        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss# + 0.1 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
@@ -436,7 +436,7 @@ class Trainer:
             if not param.requires_grad:
                 print(f'FROZEN {name}') # frozen weights
                 continue
-            if (len(param.shape) == 1 or name.endswith(".bias") or "bn" in name or name in skip_list) and ("fc" not in name):
+            if (len(param.shape) == 1 or name.endswith(".bias") or "bn" in name or name in skip_list):# and ("fc" not in name):
                 no_decay.append(param)
                 print('-', name)
             else:

@@ -146,7 +146,7 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 5  # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 4  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = True if torch.cuda.is_available() else False
         self.max_moves = 37000  # Maximum number of moves if game is not finished before
         self.num_simulations = 50  # Number of future moves self-simulated
@@ -188,10 +188,10 @@ class MuZeroConfig:
 
         #Jago
         self.jago_blocks = 4
-        self.jago_encoding_size = 1024
-        self.jago_fc_reward_layers = 256
-        self.jago_fc_value_layers = 256
-        self.jago_fc_policy_layers = 256
+        self.jago_encoding_size = 512
+        self.jago_fc_reward_layers = 128
+        self.jago_fc_value_layers = 128
+        self.jago_fc_policy_layers = 128
 
 
         ### Training
@@ -208,18 +208,17 @@ class MuZeroConfig:
         self.momentum = 0.9  # Used only if optimizer is SGD
 
         # Exponential learning rate schedule
-        self.lr_init = 0.005  # Initial learning rate
+        self.lr_init = 0.01  # Initial learning rate
         self.lr_decay_rate = 1.0  # Set it to 1 to use a constant learning rate
         # self.lr_decay_steps = 350e3
         self.lr_decay_steps = 1e5
-
 
 
         ### Replay Buffer
         self.replay_buffer_size = 500  # Number of self-play games to keep in the replay buffer
         self.num_unroll_steps = 5  # Number of game moves to keep for every batch element
         self.td_steps = 5  # Number of steps in the future to take into account for calculating the target value
-        self.PER = True  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
+        self.PER = False  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
         self.PER_alpha = 1.0  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
 
         # Reanalyze (See paper appendix Reanalyse)

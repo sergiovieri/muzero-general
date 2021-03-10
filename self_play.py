@@ -641,7 +641,8 @@ class GameHistory:
                 #    )
                 #)
             else:
-                obs = numpy.zeros_like(self.observation_history[index], dtype=numpy.float32)
+                # obs = numpy.zeros_like(self.observation_history[index], dtype=numpy.float32)
+                obs = self.observation_history[0] / 255.0
                 act = numpy.zeros((1, width, height), dtype=numpy.float32)
                 # previous_observation = numpy.concatenate(
                 #     (
