@@ -2,6 +2,10 @@ import math
 from abc import ABC, abstractmethod
 
 import torch
+from pl_bolts.models.autoencoders.components import (
+    resnet18_decoder,
+    resnet18_encoder,
+)
 
 
 class MuZeroNetwork:
@@ -570,15 +574,18 @@ class Encoder(torch.nn.Module):
         depth,
     ):
         super().__init__()
-        # 96 -> 23 (k=8, s=4, p=0)
-        # 23 -> 10 (k=4, s=2, p=0)
-        # 10 -> 4 (k=4, s=2, p=0)
         self.features = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels, depth, kernel_size=8, stride=4, padding=0),
+            torch.nn.Conv2d(in_channels, depth, kernel_size=6, stride=2, padding=2),
+            torch.nn.BatchNorm2d(depth),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(depth, depth * 2, kernel_size=4, stride=2, padding=0),
+            torch.nn.Conv2d(depth, depth * 2, kernel_size=6, stride=2, padding=2),
+            torch.nn.BatchNorm2d(depth * 2),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(depth * 2, depth * 4, kernel_size=4, stride=2, padding=0),
+            torch.nn.Conv2d(depth * 2, depth * 4, kernel_size=6, stride=2, padding=2),
+            torch.nn.BatchNorm2d(depth * 4),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(depth * 4, depth * 4, kernel_size=6, stride=2, padding=2),
+            torch.nn.BatchNorm2d(depth * 4),
             torch.nn.ReLU(inplace=True),
             torch.nn.Flatten(),
         )
@@ -596,30 +603,120 @@ class Decoder(torch.nn.Module):
         out_channels,
     ):
         super().__init__()
-        # 1 -> 3 (k=3, s=2)
-        # 3 -> 9 (k=5, s=2)
-        # 9 -> 21 (k=5, s=2)
-        # 21 -> 46 (k=6, s=2)
-        # 46 -> 96 (k=6, s=2)
         self.depth = depth
-        self.fc = torch.nn.Linear(state_size, depth * 32)
+        self.bn = torch.nn.LayerNorm(state_size)
+        self.fc = torch.nn.Linear(state_size, depth * 4 * 6 * 6)
         self.features = torch.nn.Sequential(
-            torch.nn.ConvTranspose2d(depth * 32, depth * 8, kernel_size=3, stride=2),
+            torch.nn.ConvTranspose2d(depth * 4, depth * 4, kernel_size=6, stride=2, padding=2),
+            torch.nn.BatchNorm2d(depth * 4),
             torch.nn.ReLU(inplace=True),
-            torch.nn.ConvTranspose2d(depth * 8, depth * 4, kernel_size=5, stride=2),
+            torch.nn.ConvTranspose2d(depth * 4, depth * 4, kernel_size=6, stride=2, padding=2),
+            torch.nn.BatchNorm2d(depth * 4),
             torch.nn.ReLU(inplace=True),
-            torch.nn.ConvTranspose2d(depth * 4, depth * 2, kernel_size=5, stride=2),
+            torch.nn.ConvTranspose2d(depth * 4, depth * 2, kernel_size=6, stride=2, padding=2),
+            torch.nn.BatchNorm2d(depth * 2),
             torch.nn.ReLU(inplace=True),
-            torch.nn.ConvTranspose2d(depth * 2, depth, kernel_size=6, stride=2),
+            torch.nn.ConvTranspose2d(depth * 2, depth, kernel_size=6, stride=2, padding=2),
+            torch.nn.BatchNorm2d(depth),
             torch.nn.ReLU(inplace=True),
-            torch.nn.ConvTranspose2d(depth, out_channels, kernel_size=6, stride=2),
+            torch.nn.ConvTranspose2d(depth, out_channels, kernel_size=3, stride=1, padding=1),
+            # torch.nn.Sigmoid(),
         )
 
     def forward(self, x):
+        x = self.bn(x)
         x = self.fc(x)
-        x = x.view(-1, self.depth * 32, 1, 1)
+        x = torch.nn.functional.relu(x)
+        x = x.view(-1, self.depth * 4, 6, 6)
+        self.last_mean = x[:, 0].mean().item()
+        self.last_var = x[:, 0].var().item()
         x = self.features(x)
+        x *= 0.1
+        x += 0.5
         return x
+
+
+class VAE(torch.nn.Module):
+    def __init__(
+        self,
+        observation_shape,
+        stacked_observations,
+        action_space_size,
+        depth,
+        deter_size,
+        stoch_size,
+        hidden_size,
+    ):
+        super().__init__()
+        self.observation_shape = observation_shape
+        self.stacked_observations = stacked_observations
+        self.action_space_size = action_space_size
+        self.depth = depth
+        self.deter_size = deter_size
+        self.stoch_size = stoch_size
+        self.hidden_size = hidden_size
+
+        self.representation = torch.nn.Sequential(
+            Encoder(
+                observation_shape[0] * (stacked_observations + 1) + stacked_observations,
+                depth,
+            ),
+            torch.nn.Linear(depth * 4 * 6 * 6, hidden_size),
+            torch.nn.BatchNorm1d(hidden_size),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(hidden_size, deter_size + stoch_size),
+        )
+
+        self.fc_az = torch.nn.Sequential(
+            torch.nn.Linear(action_space_size + stoch_size, hidden_size),
+            torch.nn.ReLU(inplace=True),
+        )
+        self.rnn = torch.nn.GRUCell(hidden_size, deter_size)
+
+        self.fc_he = torch.nn.Sequential(
+            torch.nn.Linear(deter_size + depth * 4 * 6 * 6, hidden_size),
+            torch.nn.BatchNorm1d(hidden_size),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(hidden_size, stoch_size),
+        )
+        self.encoder = Encoder(
+            observation_shape[0],
+            depth,
+        )
+
+        self.decoder = Decoder(
+            deter_size + stoch_size,
+            depth,
+            observation_shape[0],
+        )
+
+    def represent(self, x):
+        h, z = torch.split(self.representation(x), [self.deter_size, self.stoch_size], dim=1)
+        h = torch.tanh(h)
+        return torch.cat([h, z], dim=1)
+    
+    def decode(self, state):
+        return self.decoder(state)
+    
+    def recurrent(self, state, action, observation=None):
+        action_one_hot = (
+            torch.zeros((action.shape[0], self.action_space_size))
+            .to(action.device)
+            .float()
+        )
+        action_one_hot.scatter_(1, action.long(), 1.0)
+        h, z = torch.split(state, [self.deter_size, self.stoch_size], dim=1)
+        x = self.fc_az(torch.cat([action_one_hot, z], dim=1))
+        next_h = self.rnn(x, h)
+
+        prior = None
+        post = None
+        if observation is not None:
+            embed = self.encoder(observation)
+            self.last_he = [next_h[:, 0].mean().item(), next_h[:, 0].var().item(), embed[:, 0].mean().item(), embed[:, 0].var().item()]
+            post = self.fc_he(torch.cat([next_h, embed], dim=1))
+
+        return torch.cat([next_h, post], dim=1)
 
 
 class MuZeroResidualNetwork(AbstractNetwork):
@@ -703,28 +800,43 @@ class MuZeroResidualNetwork(AbstractNetwork):
             block_output_size_policy,
         )
 
+
+        self.vae = VAE(
+            observation_shape,
+            stacked_observations,
+            action_space_size,
+            depth=32,
+            deter_size=512,
+            stoch_size=32,
+            hidden_size=512,
+        )
+
         # VAE
-        self.hidden = 600
-        self.depth = 64
-        self.deter_size = 0
-        self.stoch_size = 600
-        self.encoder = Encoder(
-            observation_shape[0] * (stacked_observations + 1) + stacked_observations,
-            self.depth,
-        )
+        # self.hidden = 512
+        # self.depth = 32
+        # self.deter_size = 0
+        # self.stoch_size = 128
+        # self.encoder = Encoder(
+        #     observation_shape[0] * (stacked_observations + 1) + stacked_observations,
+            # observation_shape[0],
+        #     self.depth,
+        # )
 
-        self.fc_post = torch.nn.Sequential(
-            torch.nn.Linear(4 * 4 * self.depth * 4, self.hidden),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(self.hidden, self.stoch_size),
-            torch.nn.ReLU(inplace=True),
-        )
+        # self.fc_post = torch.nn.Sequential(
+        #     torch.nn.Linear(6 * 6 * self.depth * 4, self.hidden),
+        #     torch.nn.ReLU(inplace=True),
+        #     torch.nn.Linear(self.hidden, self.stoch_size),
+        #     torch.nn.ReLU(inplace=True),
+        # )
 
-        self.decoder = Decoder(
-            self.deter_size + self.stoch_size,
-            self.depth,
-            observation_shape[0],
-        )
+        # self.fc_mu = torch.nn.Linear(self.hidden, self.stoch_size)
+        # self.fc_var = torch.nn.Linear(self.hidden, self.stoch_size)
+
+        # self.decoder = Decoder(
+        #     self.deter_size + self.stoch_size,
+        #     self.depth,
+        #     observation_shape[0],
+        # )
 
         # for m in self.modules():
         #     if isinstance(m, torch.nn.Conv2d):
@@ -733,6 +845,12 @@ class MuZeroResidualNetwork(AbstractNetwork):
     def vae_test(self, observation):
         embed = self.encoder(observation)
         post = self.fc_post(embed)
+        # mean = self.fc_mu(post)
+        # log_var = self.fc_var(post)
+        # std = torch.exp(log_var / 2)
+        # q = torch.distributions.Normal(mean, std)
+        # z = q.rsample()
+        # pred = self.decoder(z)
         pred = self.decoder(post)
         return pred
 

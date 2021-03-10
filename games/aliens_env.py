@@ -82,9 +82,9 @@ class Game(AbstractGame):
         reward, done = 0, False
         for t in range(4):
             reward += self.ale.act(self.actions.get(action))
-            if t == 2:
+            if t == 0 or t == 2:
                 frame_buffer[0] = self._get_state()
-            elif t == 3:
+            elif t == 1 or t == 3:
                 frame_buffer[1] = self._get_state()
             done = self.ale.game_over()
             if done:
@@ -146,7 +146,7 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_workers = 5  # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.num_workers = 4  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = True if torch.cuda.is_available() else False
         self.max_moves = 37000  # Maximum number of moves if game is not finished before
         self.num_simulations = 50  # Number of future moves self-simulated
@@ -164,16 +164,16 @@ class MuZeroConfig:
 
 
         ### Network
-        self.network = "jago"  # "resnet" / "fullyconnected"
+        self.network = "resnet"  # "resnet" / "fullyconnected"
         self.support_size = 100  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size. Choose it so that support_size <= sqrt(max(abs(discounted reward)))
 
         # Residual Network
         self.downsample = "resnet"  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
-        self.blocks = 8  # Number of blocks in the ResNet
-        self.channels = 128  # Number of channels in the ResNet
+        self.blocks = 4  # Number of blocks in the ResNet
+        self.channels = 64  # Number of channels in the ResNet
         self.reduced_channels_reward = 32  # Number of channels in reward head
         self.reduced_channels_value = 32  # Number of channels in value head
-        self.reduced_channels_policy = 32  # Number of channels in policy head
+        self.reduced_channels_policy = 64  # Number of channels in policy head
         self.resnet_fc_reward_layers = [128]  # Define the hidden layers in the reward head of the dynamic network
         self.resnet_fc_value_layers = [128]  # Define the hidden layers in the value head of the prediction network
         self.resnet_fc_policy_layers = []  # Define the hidden layers in the policy head of the prediction network
@@ -198,7 +198,7 @@ class MuZeroConfig:
         self.results_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../results", os.path.basename(__file__)[:-3], datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
         self.training_steps = int(1000e3)  # Total number of training steps (ie weights update according to a batch)
-        self.batch_size = 128  # Number of parts of games to train on at each training step
+        self.batch_size = 64  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 100  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.train_on_gpu = True if torch.cuda.is_available() else False  # Train on GPU if available
@@ -208,7 +208,7 @@ class MuZeroConfig:
         self.momentum = 0.9  # Used only if optimizer is SGD
 
         # Exponential learning rate schedule
-        self.lr_init = 0.005  # Initial learning rate
+        self.lr_init = 0.01  # Initial learning rate
         self.lr_decay_rate = 1.0  # Set it to 1 to use a constant learning rate
         # self.lr_decay_steps = 350e3
         self.lr_decay_steps = 1e5
@@ -219,12 +219,12 @@ class MuZeroConfig:
         self.replay_buffer_size = 500  # Number of self-play games to keep in the replay buffer
         self.num_unroll_steps = 5  # Number of game moves to keep for every batch element
         self.td_steps = 5  # Number of steps in the future to take into account for calculating the target value
-        self.PER = True  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
+        self.PER = False  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
         self.PER_alpha = 1.0  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
 
         # Reanalyze (See paper appendix Reanalyse)
         self.use_last_model_value = True  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
-        self.reanalyse_on_gpu = True
+        self.reanalyse_on_gpu = True if torch.cuda.is_available() else False
 
 
 

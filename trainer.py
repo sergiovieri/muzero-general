@@ -72,7 +72,7 @@ class Trainer:
 
     def continuous_update_weights(self, replay_buffer, shared_storage):
         # Wait for the replay buffer to be filled
-        min_games = 10
+        min_games = 1
         while ray.get(shared_storage.get_info.remote("num_played_games")) < min_games:
             time.sleep(0.1)
 
@@ -183,6 +183,8 @@ class Trainer:
         # target_policy: batch, num_unroll_steps+1, len(action_space)
         # gradient_scale_batch: batch, num_unroll_steps+1
 
+        channels, height, width = self.config.observation_shape
+
         print(f'Ori {target_policy[:4].detach().cpu().numpy()}')
         if self.training_step < 100:
             # target_value *= 0.0
@@ -218,7 +220,15 @@ class Trainer:
         def append_img(img, r, c):
             prediction_img[:, 96*r:96*(r+1), 96*c:96*(c+1)] = numpy.clip(img.detach().cpu().numpy() * 255, 0, 255)
 
-        append_img(observation_batch[0, 0, :3], 0, 0)
+        append_img(observation_batch[0, 0, :channels], 0, 0)
+
+
+        vae_state = self.model.vae.represent(observation_batch[:, 0])
+        pred = self.model.vae.decode(vae_state)
+        append_img(pred[0], 1, 0)
+        next_loss = torch.nn.MSELoss(reduction='none')(observation_batch[:, 0, :channels], pred).view(batch_size, -1).mean(dim=1)
+        print(0, next_loss.mean().item())
+        print(self.model.vae.decoder.last_mean, self.model.vae.decoder.last_var)
 
         for i in range(1, action_batch.shape[1]):
             # print(f'>>>unroll {i}')
@@ -243,13 +253,19 @@ class Trainer:
                 # print(f'!Value {models.support_to_scalar(value[0:1], self.config.support_size).item()}')
                 # print(f'!Reward {models.support_to_scalar(reward[0:1], self.config.support_size).item()}')
 
-            pred = self.model.vae_test(observation_batch[:, i])
-            current_loss = torch.nn.MSELoss(reduction='none')(observation_batch[:, i, :3], pred).view(batch_size, -1)
-            current_loss = torch.clamp(current_loss, min=0.0002)
+            # pred = self.model.vae_test(observation_batch[:, i])#, :channels])
+
+            # vae_state = self.model.vae.recurrent(vae_state, action_batch[:, i], observation_batch[:, i, :channels])
+            vae_state = self.model.vae.recurrent(vae_state, action_batch[:, i], observation_batch[:, i, :channels])
+            pred = self.model.vae.decode(vae_state)
+            current_loss = torch.nn.MSELoss(reduction='none')(observation_batch[:, i, :channels], pred).view(batch_size, -1)
+            # current_loss = torch.clamp(current_loss, min=0.0002)
             current_loss = current_loss.mean(dim=1)
             next_loss += current_loss
             print(i, current_loss.mean().item())
-            append_img(observation_batch[0, i, :3], 0, i)
+            print(self.model.vae.decoder.last_mean, self.model.vae.decoder.last_var)
+            print('Last he', self.model.vae.last_he)
+            append_img(observation_batch[0, i, :channels], 0, i)
             append_img(pred[0], 1, i)
 
             # with torch.no_grad():
@@ -378,25 +394,34 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss + 0.1 * next_loss
+        loss = value_loss * self.config.value_loss_weight + 2.0 * reward_loss + policy_loss# + 10.0 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
             loss *= weight_batch
+
+        loss += 100.0 * next_loss
         # Mean over batch dimension (pseudocode do a sum)
         loss = loss.mean()
 
         # Optimize
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 4)
-        self.optimizer.step()
-        self.training_step += 1
 
-        # for n, p in self.model.named_parameters():
-        #     if p.grad is None:
-        #         print('No grad!!!!')
-        #         print(n)
+        vae_params = []
+        grad_norm = 0.
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                print('No grad!!!!')
+                print(n)
+            if 'vae' in n:
+                grad_norm += p.grad.data.norm(2) ** 2
+                vae_params.append(p)
+
+        print('VAE gradnorm', (grad_norm ** (1. / 2)).item())
+
+        torch.nn.utils.clip_grad_norm_(vae_params, 2)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 8)
 
         grad_norm = 0.
         l2_norm = 0.
@@ -410,6 +435,9 @@ class Trainer:
 
         # for name, param in self.model.named_parameters():
         #     print(name, param.grad.abs().mean().item(), param.data.abs().mean().item())
+ 
+        self.optimizer.step()
+        self.training_step += 1
 
         return (
             priorities,
@@ -460,7 +488,7 @@ class Trainer:
             if not param.requires_grad:
                 print(f'FROZEN {name}') # frozen weights
                 continue
-            if (len(param.shape) == 1 or name.endswith(".bias") or "bn" in name or name in skip_list) and ("fc" not in name):
+            if (len(param.shape) == 1 or name.endswith(".bias") or "bn" in name or name in skip_list):# and ("fc" not in name):
                 no_decay.append(param)
                 print('-', name)
             else:
