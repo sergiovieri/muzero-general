@@ -237,7 +237,7 @@ class Trainer:
             #     target_state = self.model.representation(observation_batch[:, i])
             # target_state.detach_()
 
-            # target_state = self.model.representation(observation_batch[:, i])
+            target_state = self.model.representation(observation_batch[:, i])
 
             # with torch.no_grad():
             #     current_value, _, current_policy, _ = self.model.initial_inference(observation_batch[:, i])
@@ -261,7 +261,8 @@ class Trainer:
             # target_value[:, i] = target_value[:, i] * (1. - value_mix) + torch.softmax(current_value, dim=1) * value_mix
             # target_policy[:, i] = target_policy[:, i] * (1. - policy_mix) + torch.softmax(current_policy, dim=1) * policy_mix
 
-            # current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
+            current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
+            next_loss += current_loss
             # if i == 1:
             #     next_loss = current_loss
             # elif i < observation_batch.shape[1]:
@@ -269,10 +270,10 @@ class Trainer:
             # else:
             #     print(f"Warning OOB {i} {observation_batch.shape[1]}")
             #     assert False
-            # print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
-            #         torch.nn.MSELoss()(target_state, ori_hidden_state).item())
+            print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
+                  torch.nn.MSELoss()(target_state, ori_hidden_state).item())
             # print(f"mn {current_loss.view(len(current_loss), -1).mean(1).min()} mx {current_loss.view(len(current_loss), -1).mean(1).max()}")
-            # print(f"0-1: {torch.nn.MSELoss()(hidden_state[0], hidden_state[1]).item()}")
+            print(f"0-1: {torch.nn.MSELoss()(hidden_state[0], hidden_state[1]).item()}")
             # Scale the gradient at the start of the dynamics function (See paper appendix Training)
             hidden_state.register_hook(lambda grad: grad * 0.5)
             predictions.append((value, reward, policy_logits))#, next_value, next_policy_logits))
@@ -355,7 +356,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss# + 0.1 * next_loss
+        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss + 0.1 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights

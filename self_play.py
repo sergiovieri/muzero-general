@@ -555,7 +555,7 @@ class Node:
         self.reward = reward
         self.hidden_state = hidden_state
 
-        policy_softmax_temp = 2.0 if is_root else 1.5
+        policy_softmax_temp = 1.5 if is_root else 1.5
         policy_values = torch.softmax(
             torch.tensor([policy_logits[0][a] / policy_softmax_temp for a in actions]), dim=0
         ).tolist()

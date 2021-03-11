@@ -762,13 +762,13 @@ class MuZeroResidualNetwork(AbstractNetwork):
 
 
 class FCBlock(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, recurrent):
+    def __init__(self, in_channels, out_channels, recurrent, affine=True):
         super().__init__()
         self.fc = torch.nn.Linear(in_channels, out_channels, bias=False)
         if recurrent:
-            self.bn = torch.nn.LayerNorm(out_channels)
+            self.bn = torch.nn.LayerNorm(out_channels, elementwise_affine=affine)
         else:
-            self.bn = torch.nn.BatchNorm1d(out_channels)
+            self.bn = torch.nn.BatchNorm1d(out_channels, affine=affine)
 
     def forward(self, x):
         x = self.fc(x)
@@ -898,7 +898,8 @@ class RepresentationJagoCnn(torch.nn.Module):
             torch.nn.ReLU(inplace=True),
             torch.nn.Flatten(),
             torch.nn.Linear(8 * 8 * depth * 2, encoding_size),
-            torch.nn.LayerNorm(encoding_size),
+            # torch.nn.LayerNorm(encoding_size, elementwise_affine=False),
+            torch.nn.BatchNorm1d(encoding_size, affine=False),
             torch.nn.ReLU(inplace=True),
         )
 
@@ -915,8 +916,8 @@ class DynamicsJago(torch.nn.Module):
         action_space_size,
     ):
         super().__init__()
-        self.fc1 = FCBlock(encoding_size + action_space_size, encoding_size, True)
-        self.fc2 = FCBlock(encoding_size, encoding_size, True)
+        self.fc1 = FCBlock(encoding_size + action_space_size, encoding_size, False)
+        self.fc2 = FCBlock(encoding_size, encoding_size, False, affine=False)
         # self.resblocks = torch.nn.ModuleList(
         #     [FCResidualBlock(encoding_size) for _ in range(num_blocks)]
         # )
