@@ -629,8 +629,8 @@ class GameHistory:
             range(index - num_stacked_observations, index)
         ):
             if 0 <= past_observation_index:
-                obs = self.observation_history[past_observation_index] / 255.0
                 act = numpy.ones((1, width, height), dtype=numpy.float32) * self.action_history[past_observation_index + 1] / 18.0
+                obs = self.observation_history[past_observation_index] / 255.0
                 #previous_observation = numpy.concatenate(
                 #    (
                 #        self.observation_history[past_observation_index] / 255.0,
@@ -641,8 +641,9 @@ class GameHistory:
                 #    )
                 #)
             else:
-                obs = numpy.zeros_like(self.observation_history[index], dtype=numpy.float32)
                 act = numpy.zeros((1, width, height), dtype=numpy.float32)
+                # obs = numpy.zeros_like(self.observation_history[index], dtype=numpy.float32)
+                obs = self.observation_history[0] / 255.0
                 # previous_observation = numpy.concatenate(
                 #     (
                 #         numpy.zeros_like(self.observation_history[index]),
@@ -650,8 +651,8 @@ class GameHistory:
                 #     )
                 # )
 
-            stacked_observations.append(obs)
             stacked_observations.append(act)
+            stacked_observations.append(obs)
             # stacked_observations[stacked_index] = obs
             # stacked_observations[stacked_index + 1] = act
             # stacked_index += 2

@@ -604,8 +604,9 @@ class Decoder(torch.nn.Module):
     ):
         super().__init__()
         self.depth = depth
-        self.bn = torch.nn.LayerNorm(state_size)
+        # self.bn1 = torch.nn.BatchNorm1d(state_size)
         self.fc = torch.nn.Linear(state_size, depth * 4 * 6 * 6)
+        self.bn2 = torch.nn.BatchNorm2d(depth * 4)
         self.features = torch.nn.Sequential(
             torch.nn.ConvTranspose2d(depth * 4, depth * 4, kernel_size=6, stride=2, padding=2),
             torch.nn.BatchNorm2d(depth * 4),
@@ -620,20 +621,43 @@ class Decoder(torch.nn.Module):
             torch.nn.BatchNorm2d(depth),
             torch.nn.ReLU(inplace=True),
             torch.nn.ConvTranspose2d(depth, out_channels, kernel_size=3, stride=1, padding=1),
-            # torch.nn.Sigmoid(),
         )
 
     def forward(self, x):
-        x = self.bn(x)
+        # x = self.bn1(x)
         x = self.fc(x)
-        x = torch.nn.functional.relu(x)
         x = x.view(-1, self.depth * 4, 6, 6)
+        x = self.bn2(x)
+        x = torch.nn.functional.relu(x)
         self.last_mean = x[:, 0].mean().item()
         self.last_var = x[:, 0].var().item()
         x = self.features(x)
         x *= 0.1
         x += 0.5
         return x
+
+
+class CatFC(torch.nn.Module):
+    def __init__(
+        self,
+        in1,
+        in2,
+        out,
+    ):
+        super().__init__()
+        self.fc_1 = torch.nn.Sequential(
+            torch.nn.Linear(in1, out),
+            torch.nn.BatchNorm1d(out),
+        )
+        self.fc_2 = torch.nn.Sequential(
+            torch.nn.Linear(in2, out),
+            torch.nn.BatchNorm1d(out),
+        )
+        self.bn = torch.nn.BatchNorm1d(out)
+
+    def forward(self, x):
+        x1, x2 = x
+        return torch.nn.functional.relu(self.bn(self.fc_1(x1) + self.fc_2(x2)))
 
 
 class VAE(torch.nn.Module):
@@ -656,57 +680,72 @@ class VAE(torch.nn.Module):
         self.stoch_size = stoch_size
         self.hidden_size = hidden_size
 
-        self.representation = torch.nn.Sequential(
-            Encoder(
-                observation_shape[0] * (stacked_observations + 1) + stacked_observations,
-                depth,
-            ),
+        self.fc_az = CatFC(action_space_size, stoch_size ** 2, hidden_size)
+        self.rnn = torch.nn.GRUCell(hidden_size, deter_size)
+
+        self.fc_he_init = torch.nn.Sequential(
             torch.nn.Linear(depth * 4 * 6 * 6, hidden_size),
             torch.nn.BatchNorm1d(hidden_size),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(hidden_size, deter_size + stoch_size),
+            torch.nn.Linear(hidden_size, stoch_size ** 2),
         )
-
-        self.fc_az = torch.nn.Sequential(
-            torch.nn.Linear(action_space_size + stoch_size, hidden_size),
-            torch.nn.ReLU(inplace=True),
-        )
-        self.rnn = torch.nn.GRUCell(hidden_size, deter_size)
-
         self.fc_he = torch.nn.Sequential(
-            torch.nn.Linear(deter_size + depth * 4 * 6 * 6, hidden_size),
-            torch.nn.BatchNorm1d(hidden_size),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(hidden_size, stoch_size),
+            CatFC(deter_size, depth * 4 * 6 * 6, hidden_size),
+            torch.nn.Linear(hidden_size, stoch_size ** 2),
         )
+        
         self.encoder = Encoder(
             observation_shape[0],
             depth,
         )
 
         self.decoder = Decoder(
-            deter_size + stoch_size,
+            deter_size + stoch_size ** 2,
             depth,
             observation_shape[0],
         )
 
+    def sample(self, logits, num_classes):
+        logits = logits.view(-1, num_classes, num_classes)
+        dist = torch.distributions.one_hot_categorical.OneHotCategorical(logits=logits)
+        sample = dist.sample()
+        probs = dist.probs
+        assert sample.shape == probs.shape
+        sample += probs - probs.detach()
+        return sample.view(-1, num_classes * num_classes)
+
+
     def represent(self, x):
-        h, z = torch.split(self.representation(x), [self.deter_size, self.stoch_size], dim=1)
-        h = torch.tanh(h)
-        return torch.cat([h, z], dim=1)
+        channels, width, height = self.observation_shape
+        idx = x.shape[1] - channels
+        num_history = 0
+        h = torch.zeros((x.shape[0], self.deter_size)).to(x.device).float()
+        z = self.sample(self.fc_he_init(self.encoder(x[:, idx:idx+channels])), self.stoch_size)
+        idx -= channels + 1
+        while idx >= 0:
+            num_history += 1
+            action = x[:, idx+channels, 0, 0:1] * 18.0
+            print('action', action.min().item(), action.max().item())
+            h, z = self.recurrent((h, z), action, x[:, idx:idx+channels])
+            idx -= channels + 1
+
+        assert idx == -(channels + 1)
+        assert num_history == 7
+
+        return h, z
     
     def decode(self, state):
-        return self.decoder(state)
+        return self.decoder(torch.cat(state, dim=1))
     
     def recurrent(self, state, action, observation=None):
+        h, z = state
         action_one_hot = (
             torch.zeros((action.shape[0], self.action_space_size))
             .to(action.device)
             .float()
         )
         action_one_hot.scatter_(1, action.long(), 1.0)
-        h, z = torch.split(state, [self.deter_size, self.stoch_size], dim=1)
-        x = self.fc_az(torch.cat([action_one_hot, z], dim=1))
+        x = self.fc_az((action_one_hot, z))
         next_h = self.rnn(x, h)
 
         prior = None
@@ -714,9 +753,9 @@ class VAE(torch.nn.Module):
         if observation is not None:
             embed = self.encoder(observation)
             self.last_he = [next_h[:, 0].mean().item(), next_h[:, 0].var().item(), embed[:, 0].mean().item(), embed[:, 0].var().item()]
-            post = self.fc_he(torch.cat([next_h, embed], dim=1))
+            post = self.sample(self.fc_he((next_h, embed)), self.stoch_size)
 
-        return torch.cat([next_h, post], dim=1)
+        return next_h, post
 
 
 class MuZeroResidualNetwork(AbstractNetwork):

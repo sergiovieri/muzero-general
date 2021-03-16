@@ -420,7 +420,7 @@ class Trainer:
 
         print('VAE gradnorm', (grad_norm ** (1. / 2)).item())
 
-        torch.nn.utils.clip_grad_norm_(vae_params, 2)
+        torch.nn.utils.clip_grad_norm_(vae_params, 8)
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 8)
 
         grad_norm = 0.
