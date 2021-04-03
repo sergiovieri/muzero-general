@@ -249,6 +249,23 @@ def normalize_state_fc(state):
 
 G = 8
 
+class SELayer(torch.nn.Module):
+    def __init__(self, channels, ratio):
+        super().__init__()
+        self.avg_pool = torch.nn.AdaptiveAvgPool2d(1)
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(channels, channels // ratio),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(channels // ratio, channels * 2),
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        gamma, beta = torch.split(self.fc(y).view(b, c * 2, 1, 1), c, dim=1)
+        return x * torch.sigmoid(gamma).expand_as(x) + beta.expand_as(x)
+
+
 # Residual block
 class ResidualBlock(torch.nn.Module):
     def __init__(self, num_channels, stride=1, identity_init=False):
@@ -257,6 +274,7 @@ class ResidualBlock(torch.nn.Module):
         self.bn1 = torch.nn.GroupNorm(G, num_channels)
         self.conv2 = conv3x3(num_channels, num_channels, bias=False)
         self.bn2 = torch.nn.GroupNorm(G, num_channels)
+        self.se = SELayer(num_channels, 8)
         if identity_init:
             self.bn2.weight.data.fill_(0)
 
@@ -267,6 +285,7 @@ class ResidualBlock(torch.nn.Module):
         x = torch.nn.functional.relu(x)
         x = self.conv2(x)
         x = self.bn2(x)
+        x = self.se(x)
         x += inp
         x = torch.nn.functional.relu(x)
         return x
@@ -347,7 +366,7 @@ class DownSample(torch.nn.Module):
             stride=2,
         )
         self.resblocks1 = torch.nn.ModuleList(
-            [ResidualBlock(out_channels // 2) for _ in range(2)]
+            [ResidualBlock(out_channels // 2, identity_init=True) for _ in range(2)]
         )
         self.conv2 = ConvolutionBlock(
             out_channels // 2,
@@ -355,11 +374,11 @@ class DownSample(torch.nn.Module):
             stride=2,
         )
         self.resblocks2 = torch.nn.ModuleList(
-            [ResidualBlock(out_channels) for _ in range(3)]
+            [ResidualBlock(out_channels, identity_init=True) for _ in range(3)]
         )
         self.pooling1 = torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
         self.resblocks3 = torch.nn.ModuleList(
-            [ResidualBlock(out_channels) for _ in range(3)]
+            [ResidualBlock(out_channels, identity_init=True) for _ in range(3)]
         )
         self.pooling2 = torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
 
@@ -386,10 +405,13 @@ class DownsampleCNN(torch.nn.Module):
         # 11 -> 6 (k=3, p=1, s=2)
         self.features = torch.nn.Sequential(
             torch.nn.Conv2d(in_channels, mid_channels, kernel_size=8, stride=4, padding=2),
+            torch.nn.BatchNorm2d(mid_channels),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(mid_channels, mid_channels, kernel_size=4, stride=2, padding=0),
+            torch.nn.Conv2d(mid_channels, out_channels, kernel_size=4, stride=2, padding=0),
+            torch.nn.BatchNorm2d(out_channels),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(mid_channels, out_channels, kernel_size=3, stride=2, padding=1),
+            torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2, padding=1),
+            torch.nn.BatchNorm2d(out_channels),
             torch.nn.ReLU(inplace=True),
         )
 
@@ -430,7 +452,7 @@ class RepresentationNetwork(torch.nn.Module):
                 raise NotImplementedError('downsample should be "resnet" or "CNN".')
 
         self.resblocks = torch.nn.ModuleList(
-            [ResidualBlock(num_channels) for _ in range(num_blocks)]
+            [ResidualBlock(num_channels, identity_init=True) for _ in range(num_blocks)]
         )
         # self.bn_state = torch.nn.GroupNorm(G, num_channels)
 
@@ -470,15 +492,15 @@ class DynamicsNetwork(torch.nn.Module):
         # self.bn2 = torch.nn.GroupNorm(G, num_channels)
         # self.bn2.weight.data.fill_(0)
         self.resblocks = torch.nn.ModuleList(
-            [ResidualBlock(num_channels, identity_init=False) for _ in range(num_blocks)]
+            [ResidualBlock(num_channels, identity_init=True) for _ in range(num_blocks)]
         )
         # self.hidden_state_conv = ConvolutionBlock(num_channels, num_channels, relu=False, zero_init=True)
 
         # self.bn_state = torch.nn.GroupNorm(G, num_channels)
         # self.bn_reward = torch.nn.GroupNorm(G, num_channels)
-        self.conv1x1_reward = torch.nn.Conv2d(num_channels, reduced_channels_reward, 1)
+        # self.conv1x1_reward = torch.nn.Conv2d(num_channels, reduced_channels_reward, 1)
         # self.avg_reward = torch.nn.AdaptiveAvgPool2d(1)
-        # self.conv1x1_reward = ConvolutionBlock(num_channels, reduced_channels_reward, kernel_size=1, padding=0)
+        self.conv1x1_reward = ConvolutionBlock(num_channels, reduced_channels_reward, kernel_size=1, padding=0)
         self.block_output_size_reward = block_output_size_reward
         # self.fc = mlp(reduced_channels_reward, fc_reward_layers, full_support_size)
         self.fc = mlp(
@@ -507,7 +529,7 @@ class DynamicsNetwork(torch.nn.Module):
         state = x
         # x = self.bn_reward(x)
         x = self.conv1x1_reward(x)
-        x = torch.nn.functional.relu(x)
+        # x = torch.nn.functional.relu(x)
         # x = self.avg_reward(x)
         # x = torch.flatten(x, start_dim=1)
         x = x.view(-1, self.block_output_size_reward)
@@ -530,12 +552,12 @@ class PredictionNetwork(torch.nn.Module):
         block_output_size_policy,
     ):
         super().__init__()
-        self.conv1x1_value = torch.nn.Conv2d(num_channels, reduced_channels_value, 1)
+        # self.conv1x1_value = torch.nn.Conv2d(num_channels, reduced_channels_value, 1)
         # self.avg_value = torch.nn.AdaptiveAvgPool2d(1)
-        # self.conv1x1_value = ConvolutionBlock(num_channels, reduced_channels_value, kernel_size=1, padding=0)
-        self.conv1x1_policy = torch.nn.Conv2d(num_channels, reduced_channels_policy, 1)
+        self.conv1x1_value = ConvolutionBlock(num_channels, reduced_channels_value, kernel_size=1, padding=0)
+        # self.conv1x1_policy = torch.nn.Conv2d(num_channels, reduced_channels_policy, 1)
         # self.avg_policy = torch.nn.AdaptiveAvgPool2d(1)
-        # self.conv1x1_policy = ConvolutionBlock(num_channels, reduced_channels_policy, kernel_size=1, padding=0)
+        self.conv1x1_policy = ConvolutionBlock(num_channels, reduced_channels_policy, kernel_size=1, padding=0)
         self.block_output_size_value = block_output_size_value
         self.block_output_size_policy = block_output_size_policy
         # self.fc_value = mlp(reduced_channels_value, fc_value_layers, full_support_size)
@@ -549,10 +571,10 @@ class PredictionNetwork(torch.nn.Module):
 
     def forward(self, x):
         value = self.conv1x1_value(x)
-        value = torch.nn.functional.relu(value)
+        # value = torch.nn.functional.relu(value)
         # value = self.avg_value(value)
         policy = self.conv1x1_policy(x)
-        policy = torch.nn.functional.relu(policy)
+        # policy = torch.nn.functional.relu(policy)
         # policy = self.avg_policy(policy)
         # value = torch.flatten(value, start_dim=1)
         # policy = torch.flatten(policy, start_dim=1)
@@ -761,6 +783,16 @@ class MuZeroResidualNetwork(AbstractNetwork):
 ##################################
 
 
+class RecurrentBatchNorm1d(torch.nn.Module):
+    def __init__(self, num_features, affine=True):
+        super().__init__()
+        self.bn = torch.nn.BatchNorm1d(num_features, affine=affine)
+
+    def forward(self, x):
+        self.mean = x.mean(dim=1)
+        self.var = x.var(dim=1)
+        return self.bn(x)
+
 class FCBlock(torch.nn.Module):
     def __init__(self, in_channels, out_channels, recurrent, affine=True):
         super().__init__()
@@ -768,7 +800,8 @@ class FCBlock(torch.nn.Module):
         if recurrent:
             self.bn = torch.nn.LayerNorm(out_channels, elementwise_affine=affine)
         else:
-            self.bn = torch.nn.BatchNorm1d(out_channels, affine=affine)
+            # self.bn = torch.nn.BatchNorm1d(out_channels, affine=affine)
+            self.bn = RecurrentBatchNorm1d(out_channels, affine=affine)
 
     def forward(self, x):
         x = self.fc(x)
@@ -899,7 +932,7 @@ class RepresentationJagoCnn(torch.nn.Module):
             torch.nn.Flatten(),
             torch.nn.Linear(8 * 8 * depth * 2, encoding_size),
             # torch.nn.LayerNorm(encoding_size, elementwise_affine=False),
-            torch.nn.BatchNorm1d(encoding_size, affine=False),
+            torch.nn.BatchNorm1d(encoding_size, affine=True),
             torch.nn.ReLU(inplace=True),
         )
 
@@ -916,8 +949,8 @@ class DynamicsJago(torch.nn.Module):
         action_space_size,
     ):
         super().__init__()
-        self.fc1 = FCBlock(encoding_size + action_space_size, encoding_size, False)
-        self.fc2 = FCBlock(encoding_size, encoding_size, False, affine=False)
+        self.fc1 = FCBlock(encoding_size + action_space_size, encoding_size, True)
+        self.fc2 = FCBlock(encoding_size, encoding_size, True, affine=True)
         # self.resblocks = torch.nn.ModuleList(
         #     [FCResidualBlock(encoding_size) for _ in range(num_blocks)]
         # )

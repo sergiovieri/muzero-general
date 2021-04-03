@@ -70,6 +70,7 @@ class Trainer:
             )
 
     def continuous_update_weights(self, replay_buffer, shared_storage):
+        numpy.set_printoptions(precision=4, suppress=True)
         # Wait for the replay buffer to be filled
         min_games = 10
         while ray.get(shared_storage.get_info.remote("num_played_games")) < min_games:
@@ -103,7 +104,7 @@ class Trainer:
                 replay_buffer.update_priorities.remote(priorities, index_batch)
 
             # Save to the shared storage
-            if self.training_step % self.config.checkpoint_interval == 0:
+            if self.training_step >= 100 and self.training_step % self.config.checkpoint_interval == 0:
                 shared_storage.set_info.remote(
                     {
                         "weights": copy.deepcopy(self.model.get_weights()),
@@ -211,6 +212,8 @@ class Trainer:
             models.support_to_scalar(torch.log(target_value[0:1, 0]), self.config.support_size).item(),
             models.support_to_scalar(value[0:1], self.config.support_size).item(),
         )]
+        last_mean = {}
+        last_var = {}
         for i in range(1, action_batch.shape[1]):
             # print(f'>>>unroll {i}')
             value, reward, policy_logits, hidden_state = self.model.recurrent_inference(
@@ -237,7 +240,7 @@ class Trainer:
             #     target_state = self.model.representation(observation_batch[:, i])
             # target_state.detach_()
 
-            target_state = self.model.representation(observation_batch[:, i])
+            # target_state = self.model.representation(observation_batch[:, i])
 
             # with torch.no_grad():
             #     current_value, _, current_policy, _ = self.model.initial_inference(observation_batch[:, i])
@@ -261,8 +264,8 @@ class Trainer:
             # target_value[:, i] = target_value[:, i] * (1. - value_mix) + torch.softmax(current_value, dim=1) * value_mix
             # target_policy[:, i] = target_policy[:, i] * (1. - policy_mix) + torch.softmax(current_policy, dim=1) * policy_mix
 
-            current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
-            next_loss += current_loss
+            # current_loss = torch.nn.MSELoss(reduction='none')(hidden_state, target_state).view(batch_size, -1).mean(dim=1)
+            # next_loss += current_loss
             # if i == 1:
             #     next_loss = current_loss
             # elif i < observation_batch.shape[1]:
@@ -270,10 +273,20 @@ class Trainer:
             # else:
             #     print(f"Warning OOB {i} {observation_batch.shape[1]}")
             #     assert False
-            print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
-                  torch.nn.MSELoss()(target_state, ori_hidden_state).item())
+            # print(i, current_loss.mean().item(), torch.nn.MSELoss()(hidden_state, ori_hidden_state).item(),
+            #      torch.nn.MSELoss()(target_state, ori_hidden_state).item())
             # print(f"mn {current_loss.view(len(current_loss), -1).mean(1).min()} mx {current_loss.view(len(current_loss), -1).mean(1).max()}")
-            print(f"0-1: {torch.nn.MSELoss()(hidden_state[0], hidden_state[1]).item()}")
+            # print(f"0-1: {torch.nn.MSELoss()(hidden_state[0], hidden_state[1]).item()}")
+
+            # for n, m in self.model.named_modules():
+            #     if isinstance(m, models.RecurrentBatchNorm1d):
+            #         print(n, m.mean[0].item(), m.var[0].item())
+            #         if n in last_mean:
+            #             next_loss += torch.nn.MSELoss(reduction='none')(last_mean[n], m.mean) * 10
+            #             next_loss += torch.nn.MSELoss(reduction='none')(last_var[n], m.var) * 10
+            #         last_mean[n] = m.mean
+            #         last_var[n] = m.var
+
             # Scale the gradient at the start of the dynamics function (See paper appendix Training)
             hidden_state.register_hook(lambda grad: grad * 0.5)
             predictions.append((value, reward, policy_logits))#, next_value, next_policy_logits))
@@ -356,7 +369,7 @@ class Trainer:
             )
 
         # Scale the value loss, paper recommends by 0.25 (See paper appendix Reanalyze)
-        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss + 0.1 * next_loss
+        loss = value_loss * self.config.value_loss_weight + reward_loss + policy_loss# + 0.01 * next_loss
         # loss = reward_loss + value_loss * self.config.value_loss_weight #+ 0.01 * next_loss
         if self.config.PER:
             # Correct PER bias by using importance-sampling (IS) weights
@@ -367,7 +380,7 @@ class Trainer:
         # Optimize
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 4)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 8)
         self.optimizer.step()
         self.training_step += 1
 

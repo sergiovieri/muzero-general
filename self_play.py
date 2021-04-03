@@ -48,6 +48,7 @@ class SelfPlay:
                     False,
                     "self",
                     0,
+                    shared_storage=shared_storage,
                 )
 
                 # Save to the shared storage
@@ -64,11 +65,10 @@ class SelfPlay:
                 replay_buffer.save_game.remote(game_history, shared_storage)
 
             else:
-                time.sleep(60)
                 print('PLAY TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
                 # Take the best action (no exploration) in test mode
                 game_history = self.play_game(
-                    0.25,
+                    0.5,
                     self.config.temperature_threshold,
                     False,
                     "self" if len(self.config.players) == 1 else self.config.opponent,
@@ -112,6 +112,7 @@ class SelfPlay:
                             ),
                         }
                     )
+                time.sleep(10)
 
             # Managing the self-play / training ratio
             if not test_mode and self.config.self_play_delay:
@@ -132,7 +133,7 @@ class SelfPlay:
         self.close_game()
 
     def play_game(
-        self, temperature, temperature_threshold, render, opponent, muzero_player, test_mode=False,
+        self, temperature, temperature_threshold, render, opponent, muzero_player, test_mode=False, shared_storage=None,
     ):
         """
         Play one game with actions based on the Monte Carlo tree search at each moves.
@@ -159,10 +160,15 @@ class SelfPlay:
         tree_depth_sum = 0
         tree_depth_num = 0
 
+        steps = 0
+
         with torch.no_grad():
             while (
                 not done and len(game_history.action_history) <= self.config.max_moves
             ):
+                steps += 1
+                if shared_storage is not None and steps % 10 == 0:
+                    self.model.set_weights(ray.get(shared_storage.get_info.remote("weights")))
                 assert (
                     len(numpy.array(observation).shape) == 3
                 ), f"Observation should be 3 dimensionnal instead of {len(numpy.array(observation).shape)} dimensionnal. Got observation of shape: {numpy.array(observation).shape}"
@@ -201,6 +207,37 @@ class SelfPlay:
 
                     tree_depth_num += 1
                     tree_depth_sum += mcts_info["max_tree_depth"]
+
+                    if steps % 10 == 0:
+                        prior_policy = numpy.array([
+                            root.children[action].prior
+                            if action in root.children.keys()
+                            else numpy.NaN
+                            for action in self.config.action_space
+                        ])
+
+                        policy_after_planning = numpy.array([
+                            root.children[action].visit_count / self.config.num_simulations
+                            if action in root.children.keys()
+                            else numpy.NaN
+                            for action in self.config.action_space
+                        ])
+
+                        values_after_planning = numpy.array([
+                            root.children[action].value()
+                            if action in root.children.keys()
+                            else numpy.NaN
+                            for action in self.config.action_space
+                        ])
+
+                        values_after_planning_normalized = numpy.array([
+                            mcts_info['min_max_stats'].normalize(root.children[action].value())
+                            if action in root.children.keys()
+                            else 0.5
+                            for action in self.config.action_space
+                        ])
+                        numpy.set_printoptions(precision=4, suppress=True)
+                        print('Prior\n', prior_policy, '\nAfter\n', policy_after_planning, '\nValues\n', values_after_planning, '\nValuesN\n', values_after_planning_normalized, '\nDepth', mcts_info['max_tree_depth'])
 
                     if render:
                         print(f'Tree depth: {mcts_info["max_tree_depth"]}')
@@ -253,6 +290,8 @@ class SelfPlay:
                     )
 
                 observation, reward, done = self.game.step(action)
+                if not test_mode:
+                    reward = min(max(-2.0, reward * 2.0), 2.0)
 
                 if render:
                     print(f"Played action: {self.game.action_to_string(action)}")
@@ -496,7 +535,7 @@ class MCTS:
                 * (child.value() if len(self.config.players) == 1 else -child.value())
             )
         else:
-            value_score = 0.5 if is_root else 0.5
+            value_score = 0.5 if is_root else 0.25
 
         return prior_score + value_score
 
@@ -509,7 +548,8 @@ class MCTS:
             for node in reversed(search_path):
                 node.value_sum += value
                 node.visit_count += 1
-                min_max_stats.update(node.reward + self.config.discount * node.value())
+                # min_max_stats.update(node.reward + self.config.discount * node.value())
+                min_max_stats.update(node.value())
 
                 value = node.reward + self.config.discount * value
 
@@ -550,12 +590,12 @@ class Node:
         We expand a node using the value, reward and policy prediction obtained from the
         neural network.
         """
-        reward -= 0.2
+        reward -= 0.01
         self.to_play = to_play
         self.reward = reward
         self.hidden_state = hidden_state
 
-        policy_softmax_temp = 1.5 if is_root else 1.5
+        policy_softmax_temp = 1.0 if is_root else 1.0
         policy_values = torch.softmax(
             torch.tensor([policy_logits[0][a] / policy_softmax_temp for a in actions]), dim=0
         ).tolist()
@@ -679,7 +719,7 @@ class MinMaxStats:
     def update(self, value):
         self.maximum = max(self.maximum, value)
         self.minimum = min(self.minimum, value)
-        self.minimum = min(self.minimum, self.maximum - 1)
+        # self.minimum = min(self.minimum, self.maximum - 0.1)
 
     def normalize(self, value):
         if self.maximum > self.minimum:
